@@ -133,3 +133,105 @@ def dibujar_salto(ensayo: Ensayo, salto: Salto, ruta: Path, margen: int = 6) -> 
 def nombre_figura(salto: Salto) -> str:
     marcador = re.sub(r"[^A-Za-z0-9_-]", "_", salto.marcador)
     return f"{salto.fotograma:06d}_{marcador}.png"
+
+
+COLUMNAS_EVENTOS = (
+    "lado",
+    "tipo",
+    "fotograma",
+    "tiempo_s",
+    "duda_desde",
+    "duda_hasta",
+    "confianza",
+    "marcador",
+    "fotograma_guardado",
+    "diferencia_fotogramas",
+)
+
+
+def escribir_csv_eventos(eventos, emparejados, ruta: Path) -> None:
+    """Tabla de eventos propuestos; si el archivo ya traía eventos, se añade la diferencia."""
+    guardado = {id(e.propuesta): e for e in emparejados if e.propuesta is not None}
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    with ruta.open("w", newline="", encoding="utf-8-sig") as archivo:
+        tabla = csv.writer(archivo, delimiter=";")
+        tabla.writerow(COLUMNAS_EVENTOS)
+        for e in eventos:
+            par = guardado.get(id(e))
+            tabla.writerow(
+                [
+                    e.lado,
+                    e.tipo,
+                    e.fotograma,
+                    _numero(e.tiempo_s, 3),
+                    e.fotograma_desde,
+                    e.fotograma_hasta,
+                    e.confianza,
+                    e.marcador,
+                    _numero(par.fotograma_registrado, 1) if par else "",
+                    _numero(par.diferencia_fotogramas, 1) if par else "",
+                ]
+            )
+
+
+def dibujar_eventos(ensayo: Ensayo, eventos, registrados, ruta: Path) -> None:
+    """Dibuja, para cada pie, la velocidad que motiva cada propuesta y su intervalo de duda."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from nexus_mocap.eventos import LADOS, ParametrosEventos, marcadores_del_pie, velocidad
+
+    colores = {"contacto": "#0b7a6b", "despegue": "#b3541e"}
+    fotogramas = np.arange(ensayo.n_fotogramas) + ensayo.primer_fotograma
+    ancho = float(np.clip(ensayo.n_fotogramas / ensayo.frecuencia * 1.8, 8, 60))
+    figura, ejes = plt.subplots(2, 1, figsize=(ancho, 5.6), sharex=True)
+
+    for ax, lado in zip(ejes, LADOS, strict=True):
+        for tipo, encontrado in marcadores_del_pie(ensayo, lado).items():
+            if encontrado is None:
+                continue
+            indice, nombre = encontrado
+            v = velocidad(ensayo.posiciones[indice], ensayo.frecuencia, ParametrosEventos())
+            ax.plot(fotogramas, v / 1000, color=colores[tipo], linewidth=1.2, label=f"{nombre} ({tipo})")
+        for e in eventos:
+            if e.lado != lado:
+                continue
+            ax.axvspan(e.fotograma_desde, e.fotograma_hasta, color=colores[e.tipo], alpha=0.18)
+            ax.axvline(e.fotograma, color=colores[e.tipo], linewidth=1.4)
+            ax.annotate(
+                str(e.fotograma),
+                (e.fotograma, 1.0),
+                xycoords=("data", "axes fraction"),
+                xytext=(0, 2),
+                textcoords="offset points",
+                ha="center",
+                fontsize=7,
+                color=colores[e.tipo],
+            )
+        for r in registrados:
+            if r.lado == lado:
+                ax.plot(
+                    [r.tiempo_s * ensayo.frecuencia + 1],
+                    [0],
+                    marker="^",
+                    color=colores[r.tipo],
+                    markeredgecolor="black",
+                    markersize=8,
+                    clip_on=False,
+                    zorder=5,
+                )
+        ax.set_ylabel(f"Pie {lado}\nvelocidad (m/s)")
+        ax.set_ylim(bottom=0)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=7, loc="upper right")
+    ejes[-1].set_xlabel("Fotograma")
+    nota = "Líneas: fotograma propuesto. Franja: intervalo de duda."
+    if registrados:
+        nota += " Triángulos: eventos que ya estaban guardados en el archivo."
+    figura.suptitle(nota, fontsize=9, y=0.995)
+    figura.tight_layout()
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    figura.savefig(ruta, dpi=130)
+    plt.close(figura)

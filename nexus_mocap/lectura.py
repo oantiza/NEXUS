@@ -124,3 +124,44 @@ def leer_c3d(
         frecuencia=float(c3d["header"]["points"]["frame_rate"]),
         primer_fotograma=int(c3d["header"]["points"]["first_frame"]) + 1,
     )
+
+
+@dataclass(frozen=True)
+class EventoRegistrado:
+    """Evento de marcha que ya está guardado en el C3D (marcado en Nexus u otro programa)."""
+
+    lado: str  # "izquierdo" o "derecho"
+    tipo: str  # "contacto" o "despegue"
+    tiempo_s: float
+
+
+_CODIGOS = {"LHS": ("izquierdo", "contacto"), "RHS": ("derecho", "contacto")}
+_CODIGOS |= {"LTO": ("izquierdo", "despegue"), "RTO": ("derecho", "despegue")}
+
+
+def leer_eventos(ruta: str | Path) -> list[EventoRegistrado]:
+    """Lee los contactos y despegues del pie guardados en el C3D, si los hay."""
+    import ezc3d
+
+    grupo = ezc3d.c3d(str(ruta))["parameters"].get("EVENT")
+    if not grupo or "TIMES" not in grupo:
+        return []
+    tiempos = np.atleast_2d(np.asarray(grupo["TIMES"]["value"], dtype=float))
+    if tiempos.shape[0] != 2:
+        return []
+    contextos = [str(v).strip() for v in grupo.get("CONTEXTS", {}).get("value", [])]
+    etiquetas = [str(v).strip() for v in grupo.get("LABELS", {}).get("value", [])]
+
+    eventos = []
+    for i in range(tiempos.shape[1]):
+        contexto = contextos[i] if i < len(contextos) else ""
+        etiqueta = etiquetas[i] if i < len(etiquetas) else ""
+        clave = _CODIGOS.get(contexto.upper()) or _CODIGOS.get(etiqueta.upper())
+        if clave is None:
+            lado = {"left": "izquierdo", "right": "derecho"}.get(contexto.lower())
+            tipo = {"foot strike": "contacto", "foot off": "despegue"}.get(etiqueta.lower())
+            if lado is None or tipo is None:
+                continue
+            clave = (lado, tipo)
+        eventos.append(EventoRegistrado(*clave, tiempo_s=float(tiempos[0, i] * 60 + tiempos[1, i])))
+    return sorted(eventos, key=lambda e: e.tiempo_s)
