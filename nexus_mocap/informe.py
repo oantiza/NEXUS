@@ -235,3 +235,24 @@ def dibujar_eventos(ensayo: Ensayo, eventos, registrados, ruta: Path) -> None:
     ruta.parent.mkdir(parents=True, exist_ok=True)
     figura.savefig(ruta, dpi=130)
     plt.close(figura)
+
+
+def escribir_csv_huecos(huecos, ruta: Path) -> None:
+    """Tabla de tramos en que un marcador no se registró."""
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    with ruta.open("w", newline="", encoding="utf-8-sig") as archivo:
+        tabla = csv.writer(archivo, delimiter=";")
+        tabla.writerow(
+            ("marcador", "fotograma_desde", "fotograma_hasta", "fotogramas", "segundos", "posicion")
+        )
+        for h in huecos:
+            tabla.writerow(
+                [
+                    h.marcador,
+                    h.fotograma_desde,
+                    h.fotograma_hasta,
+                    h.fotogramas,
+                    _numero(h.segundos, 3),
+                    h.posicion,
+                ]
+            )

@@ -43,6 +43,18 @@ probarla con un ensayo ya revisado.
 
 Todavía no propone el inicio y el final de los giros ni el primer movimiento.
 
+### Revisa una sesión entera de una vez
+
+Con una sola orden procesa un ensayo, varios o una carpeta completa, y deja un
+informe por ensayo en una única página que se abre con doble clic en cualquier
+navegador, sin conexión. Cada informe reúne los eventos propuestos con su
+figura, la lista de tramos en que se pierde un marcador y los saltos de un
+fotograma. Una página de índice resume todos los ensayos y resalta los que
+tienen propuestas con intervalo de duda amplio.
+
+La lista de marcadores perdidos solo los enumera, del más largo al más corto;
+el programa no rellena ninguno.
+
 ### Busca saltos de un solo fotograma
 
 Un marcador que se desplaza durante un fotograma y vuelve a su sitio en el
@@ -72,6 +84,21 @@ pip install -r requirements.txt
 Todas las órdenes escriben en `informes/<nombre del ensayo>/` (o en la carpeta
 que se indique con `--salida`). Las tablas usan `;` como separador y coma
 decimal, para abrirlas directamente con Excel en español.
+
+### Una sesión entera
+
+```bash
+python -m nexus_mocap revisar ruta/a/la/carpeta
+```
+
+También admite uno o varios archivos sueltos. Al terminar, abre
+`informes/indice.html`. Dentro de `informes/<nombre del ensayo>/` quedan
+`informe.html` y las tablas `eventos.csv`, `huecos.csv` y `saltos.csv`. Si un
+archivo no se puede leer, se indica en el índice y se sigue con los demás.
+
+En Windows se puede arrastrar un C3D, varios o una carpeta encima de
+`Revisar ensayos.bat`: ejecuta esa misma orden y abre el índice. Necesita
+Python instalado. **Este lanzador no se ha probado en un Windows real.**
 
 ### Eventos de marcha
 
@@ -112,6 +139,10 @@ python -m nexus_mocap comprobar ruta/al/ensayo.c3d --magnitud-mm 8
 
 ```bash
 python scripts/descargar_ejemplo.py
+```
+
+```bash
+python -m nexus_mocap revisar datos/publicos/sample03
 ```
 
 ```bash
@@ -199,6 +230,8 @@ ruff check .
 
 ## Siguientes pasos previstos
 
+0. Probar `Revisar ensayos.bat` en Windows y, si hace falta, preparar una
+   versión que no necesite instalar Python.
 1. Inicio y final de giro y primer movimiento, con la definición que use el
    estudio.
 2. Relleno de huecos con marcadores de referencia, con salida «sin estimación
