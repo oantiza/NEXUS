@@ -1,0 +1,22 @@
+# Grabaciones y datos: nunca se suben al repositorio.
+# Las grabaciones de pacientes no deben salir del equipo autorizado del centro.
+datos/
+informes/
+*.c3d
+*.x1d
+*.x2d
+*.xcp
+*.vsk
+*.mkr
+*.enf
+*.history
+*.avi
+*.mp4
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
