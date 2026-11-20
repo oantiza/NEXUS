@@ -41,7 +41,56 @@ Si el C3D ya trae eventos marcados, la herramienta calcula sus propuestas sin
 mirarlos y después enseña a cuántos fotogramas queda cada una. Sirve para
 probarla con un ensayo ya revisado.
 
-Todavía no propone el inicio y el final de los giros ni el primer movimiento.
+### Propone giros y primer movimiento (experimental)
+
+**Experimental y sin validar.** Las definiciones son de la bibliografía, no las
+del laboratorio, y no se han comprobado con marcadores en la enfermedad de
+Parkinson. Todos los umbrales se pueden cambiar (`ParametrosGiros` en
+`nexus_mocap/giros.py` y `ParametrosInicio` en `nexus_mocap/inicio.py`).
+
+**Inicio y final del giro.** Un giro es un tramo en que la velocidad de giro de
+la pelvis alrededor del eje vertical supera 30 °/s durante más de 0,5 s
+(Mellone, Mancini, King, Horak y Chiari, 2016, *J NeuroEng Rehabil*). El rumbo
+de la pelvis sale de LASI, RASI, LPSI y RPSI (del punto medio de las PSIS al de
+las ASIS; si faltan, del sacro a las ASIS o la perpendicular a la línea de las
+ASIS) y se filtra con un Butterworth de orden 4 sin desfase a 1,5 Hz.
+
+- Inicio: primer fotograma por encima de 30 °/s. Final: el último.
+- Intervalo de duda: hasta el último fotograma anterior por debajo de 5 °/s
+  (inicio) y desde el final hasta el primero posterior por debajo de 5 °/s,
+  como la histéresis de El-Gohary y cols. (2013, *Sensors*).
+- Dos tramos del mismo sentido separados por una pausa de hasta 0,5 s son un
+  solo giro con una vacilación (Pham y cols., 2017). No se proponen giros de
+  menos de 45° (El-Gohary y cols., 2013).
+- Para cada giro: sentido (izquierda o derecha de la persona, visto desde
+  arriba), cambio de rumbo, velocidad pico y duración.
+- El eje vertical se deduce de los datos (en el que la pelvis queda por encima
+  de los pies); si no se puede, se supone Z.
+- Los huecos de más de 0,1 s no se rellenan. Un giro que toca uno, o el
+  principio o el final del registro, sale con confianza baja y el límite que
+  falta queda vacío.
+
+**Primer movimiento.** No hay una regla solo con marcadores validada en
+Parkinson; esto es una adaptación. El registro tiene que empezar con la persona
+de pie y quieta al menos 1 s; se usan hasta los últimos 5 s de ese reposo
+(Schlenstedt y cols., 2018, *Front Aging Neurosci*). Si empieza andando, como
+la mayoría de los ensayos de marcha, no se propone nada y se dice por qué. Se
+dan tres propuestas por separado, porque la definición la elige quien revisa:
+
+- Pelvis: su velocidad horizontal supera la media del reposo + 3 desviaciones
+  típicas durante al menos 0,133 s (Jones y cols., 2019, *PLoS One*) y el
+  inicio se sitúa donde superó la media + 1 DE (Schlenstedt y cols., 2018).
+  Intervalo de duda: de 1 DE a 3 DE.
+- Despegue del talón de cada pie: la altura del talón supera la media del
+  reposo + 2 DE (Oliveira y cols., 2023, *PLoS One*), durante el mismo tiempo.
+  Se indica qué pie levanta antes.
+- Tronco, si hay C7 (o T10, CLAV, STRN): la inclinación hacia delante de la
+  línea pelvis-tronco, con el mismo criterio que la pelvis.
+
+Elecciones propias, no de la bibliografía: el reposo se acota primero con la
+pelvis por debajo de 100 mm/s y los talones a menos de 15 mm de su altura
+inicial y después se ajusta para que acabe donde empieza el primer movimiento;
+cada señal se busca en los 5 s siguientes al reposo.
 
 ### Revisa una sesión entera de una vez
 
@@ -93,7 +142,8 @@ python -m nexus_mocap revisar ruta/a/la/carpeta
 
 También admite uno o varios archivos sueltos. Al terminar, abre
 `informes/indice.html`. Dentro de `informes/<nombre del ensayo>/` quedan
-`informe.html` y las tablas `eventos.csv`, `huecos.csv` y `saltos.csv`. Si un
+`informe.html` y las tablas `eventos.csv`, `huecos.csv`, `saltos.csv`,
+`giros.csv` e `inicio.csv` (estas dos, experimentales). Si un
 archivo no se puede leer, se indica en el índice y se sigue con los demás.
 
 ### En Windows, sin instalar Python
@@ -246,6 +296,23 @@ Límites: a frecuencias de captura bajas y con registros ruidosos se escapan
 más saltos pequeños, y solo se detectan los de un fotograma. Las pruebas con
 temblor y con paradas bruscas son sintéticas.
 
+### Giros y primer movimiento (experimental)
+
+No hay ninguna grabación pública con giros o primer movimiento marcados, así
+que solo se ha comprobado con datos sintéticos (las pruebas) y pasando el
+programa por los 106 archivos de ejemplo de C3D.org (86 se pueden leer) para
+ver que no propone cosas absurdas:
+
+- Ningún ensayo de marcha en línea recta recibe un giro, aunque en varios la
+  rotación de la pelvis con cada paso supera 30 °/s un instante (hasta 64 °/s):
+  lo descartan la duración mínima y los 45°.
+- Sí recibe giros quien rota la pelvis de verdad (un jugador de tenis de mesa,
+  un culturista posando): la regla no distingue un giro andando de un giro de
+  tronco y pelvis sin desplazarse.
+- El primer movimiento solo se propone en 7 archivos (cuatro son el mismo
+  registro recortado y dan el mismo fotograma); los ensayos de marcha empiezan
+  ya andando y el programa lo dice.
+
 ## Desarrollo
 
 ```bash
@@ -258,8 +325,8 @@ ruff check .
 
 ## Siguientes pasos previstos
 
-1. Inicio y final de giro y primer movimiento, con la definición que use el
-   estudio.
+1. Comparar los giros y el primer movimiento propuestos con ensayos que haya
+   marcado la neurofisióloga y adoptar la definición que use el estudio.
 2. Relleno de huecos con marcadores de referencia, con salida «sin estimación
    fiable» cuando también se pierden las referencias.
 3. Medir el tiempo total de revisión, incluido el de trasladar la decisión a

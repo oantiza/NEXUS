@@ -257,3 +257,86 @@ def escribir_csv_huecos(huecos, ruta: Path) -> None:
                     h.posicion,
                 ]
             )
+
+
+def _o_vacio(valor, decimales: int | None = None) -> str:
+    if valor is None:
+        return ""
+    return _numero(valor, decimales) if decimales is not None else str(valor)
+
+
+def escribir_csv_giros(resultado, ruta: Path) -> None:
+    """Tabla de giros propuestos (experimental). Un límite vacío es que el registro no lo alcanza."""
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    with ruta.open("w", newline="", encoding="utf-8-sig") as archivo:
+        tabla = csv.writer(archivo, delimiter=";")
+        tabla.writerow(
+            (
+                "sentido",
+                "fotograma_inicio",
+                "tiempo_inicio_s",
+                "inicio_duda_desde",
+                "fotograma_fin",
+                "tiempo_fin_s",
+                "fin_duda_hasta",
+                "cambio_rumbo_grados",
+                "velocidad_pico_grados_s",
+                "duracion_s",
+                "confianza",
+                "nota",
+            )
+        )
+        for g in resultado.giros:
+            tabla.writerow(
+                [
+                    g.sentido,
+                    _o_vacio(g.fotograma_inicio),
+                    _o_vacio(g.tiempo_inicio_s, 3),
+                    _o_vacio(g.inicio_desde),
+                    _o_vacio(g.fotograma_fin),
+                    _o_vacio(g.tiempo_fin_s, 3),
+                    _o_vacio(g.fin_hasta),
+                    _numero(g.cambio_rumbo_grados, 1),
+                    _numero(g.velocidad_pico_grados_s, 1),
+                    _numero(g.duracion_s, 2),
+                    g.confianza,
+                    g.nota,
+                ]
+            )
+
+
+def escribir_csv_inicio(resultado, ruta: Path) -> None:
+    """Tabla del primer movimiento propuesto (experimental): una fila por señal, por orden de aparición."""
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    fotogramas = sorted({i.fotograma for i in resultado.inicios})
+    with ruta.open("w", newline="", encoding="utf-8-sig") as archivo:
+        tabla = csv.writer(archivo, delimiter=";")
+        tabla.writerow(
+            (
+                "senal",
+                "marcador",
+                "fotograma",
+                "tiempo_s",
+                "duda_desde",
+                "duda_hasta",
+                "orden",
+                "criterio",
+                "reposo_desde",
+                "reposo_hasta",
+            )
+        )
+        for i in resultado.inicios:
+            tabla.writerow(
+                [
+                    i.senal,
+                    i.marcador,
+                    i.fotograma,
+                    _numero(i.tiempo_s, 3),
+                    i.fotograma_desde,
+                    i.fotograma_hasta,
+                    fotogramas.index(i.fotograma) + 1,
+                    i.criterio,
+                    resultado.reposo_desde,
+                    resultado.reposo_hasta,
+                ]
+            )

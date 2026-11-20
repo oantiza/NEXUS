@@ -204,6 +204,27 @@ def _archivos_c3d(rutas: list[Path]) -> list[Path]:
     return list(dict.fromkeys(encontrados))
 
 
+def _giros_e_inicio(ensayo: Ensayo, carpeta: Path) -> str:
+    """Propuestas experimentales de giros y primer movimiento: escribe sus tablas y devuelve su sección."""
+    from html import escape
+
+    from nexus_mocap.giros import proponer_giros
+    from nexus_mocap.informe import escribir_csv_giros, escribir_csv_inicio
+    from nexus_mocap.informe_html import seccion_giros_inicio
+    from nexus_mocap.inicio import proponer_inicio
+
+    try:
+        giros, inicio = proponer_giros(ensayo), proponer_inicio(ensayo)
+    except Exception as error:  # una función experimental no debe impedir el resto del informe
+        return (
+            "<h2>Giros y primer movimiento (experimental)</h2>"
+            f"<p>No se han podido calcular en este ensayo ({escape(str(error))}).</p>"
+        )
+    escribir_csv_giros(giros, carpeta / "giros.csv")
+    escribir_csv_inicio(inicio, carpeta / "inicio.csv")
+    return seccion_giros_inicio(giros, inicio)
+
+
 def _revisar_ensayo(archivo: Path, carpeta: Path) -> ResumenEnsayo:
     """Calcula todo para un ensayo y escribe su informe. No toca el archivo original."""
     ensayo = leer_c3d(archivo)
@@ -238,7 +259,10 @@ def _revisar_ensayo(archivo: Path, carpeta: Path) -> ResumenEnsayo:
     if eventos:
         dibujar_eventos(ensayo, eventos, [p.registrado for p in emparejados], carpeta / "eventos.png")
         figura = (carpeta / "eventos.png").read_bytes()
-    pagina = informe_ensayo(ensayo, eventos, emparejados, saltos, huecos, sin_datos, figura, avisos)
+    experimental = _giros_e_inicio(ensayo, carpeta)
+    pagina = informe_ensayo(
+        ensayo, eventos, emparejados, saltos, huecos, sin_datos, figura, avisos, secciones=(experimental,)
+    )
     escribir(carpeta / "informe.html", pagina)
     return ResumenEnsayo(
         nombre=archivo.name,
