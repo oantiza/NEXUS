@@ -19,7 +19,8 @@ Cómo se calcula, para cada pie:
    pasos arrastrados), es ancho y la confianza se marca como baja.
 
 Las fracciones se eligieron con grabaciones públicas de marcha de personas
-sanas. No están validadas con marcha parkinsoniana.
+sanas y después se comprobaron, sin cambiarlas, con un conjunto público de
+marcha en personas con Parkinson (ver README).
 """
 
 from __future__ import annotations
@@ -124,7 +125,9 @@ def _cruce(v: np.ndarray, pico: int, umbral: float, hacia_delante: bool, limite:
 
 # Nombres habituales de cada marcador según el laboratorio o el fabricante, sin la letra del lado.
 NOMBRES_TALON = ("HEE", "HEEL", "CAL")
-NOMBRES_PUNTA = ("TOE",)
+# La punta: el marcador TOE de Plug-in Gait va sobre la cabeza del segundo metatarsiano; otros
+# protocolos nombran las cabezas de los metatarsianos (MT2, MT1, MT5) y sirven igual.
+NOMBRES_PUNTA = ("TOE", "MT2", "MT1", "MT5")
 NOMBRES_TOBILLO = ("ANK", "ANKLE")
 
 
@@ -191,7 +194,9 @@ def proponer_eventos(ensayo: Ensayo, parametros: ParametrosEventos | None = None
         for tipo, encontrado in marcadores_del_pie(ensayo, lado).items():
             if encontrado is None:
                 continue
-            indice_marcador, _ = encontrado
+            indice_marcador, nombre = encontrado
+            # El tobillo arranca antes que la punta: con él, el despegue se adelanta mucho.
+            poco_fiable = tipo == "despegue" and es_tobillo(nombre)
             es_contacto = tipo == "contacto"
             fraccion = p.fraccion_contacto if es_contacto else p.fraccion_despegue
             duda = p.duda_contacto if es_contacto else p.duda_despegue
@@ -214,6 +219,8 @@ def proponer_eventos(ensayo: Ensayo, parametros: ParametrosEventos | None = None
                 else:
                     desde, hasta = min(extremos), max(extremos)
                     confianza = "normal" if (hasta - desde) / fs <= p.duda_amplia_s else "baja"
+                if poco_fiable:
+                    confianza = "baja"
                 eventos.append(
                     Evento(
                         lado=lado,

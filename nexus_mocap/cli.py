@@ -219,6 +219,11 @@ def _revisar_ensayo(archivo: Path, carpeta: Path) -> ResumenEnsayo:
             if encontrado is None:
                 faltan = True
                 avisos.append(f"Pie {lado}: no hay marcador con datos para proponer el {tipo}.")
+            elif es_tobillo(encontrado[1]) and tipo == "despegue":
+                avisos.append(
+                    f"Pie {lado}: no hay marcador de punta; el despegue se propone con el del tobillo "
+                    "y es poco fiable (en grabaciones públicas de Parkinson se adelanta unos 65 ms)."
+                )
             elif es_tobillo(encontrado[1]):
                 avisos.append(f"Pie {lado}: para el {tipo} se usa el marcador del tobillo, a falta de otro.")
 

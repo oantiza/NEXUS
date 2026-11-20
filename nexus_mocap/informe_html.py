@@ -52,8 +52,8 @@ def _pagina(titulo: str, cuerpo: str) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{escape(titulo)}</title>\n<style>{_ESTILO}</style>\n</head>\n<body>\n{cuerpo}\n"
         '<p class="nota" style="margin-top:26px">Son propuestas para revisar, no marcas definitivas. '
-        "El archivo original no se ha modificado. El método se probó con marcha de personas sanas; "
-        "no está validado con marcha parkinsoniana.</p>\n</body>\n</html>\n"
+        "El archivo original no se ha modificado. El método se ha comprobado con grabaciones públicas de "
+        "personas sanas y de personas con Parkinson, no con las de este estudio.</p>\n</body>\n</html>\n"
     )
 
 
