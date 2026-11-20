@@ -37,9 +37,13 @@ def comprobar(
     semilla: int = 0,
     parametros: Parametros | None = None,
 ) -> ResultadoComprobacion:
-    """Inserta ``n`` saltos de ``magnitud_mm`` en una copia en memoria y mide el resultado."""
+    """Inserta ``n`` saltos de ``magnitud_mm`` en una copia en memoria y mide el resultado.
+
+    Con ``n`` igual o menor que cero no se inserta ninguno.
+    """
     generador = np.random.default_rng(semilla)
-    previos = {(s.marcador, s.indice) for s in detectar_saltos(ensayo, parametros)}
+    # Se identifica cada marcador por su posición: dos pueden compartir etiqueta.
+    previos = {(s.indice_marcador, s.indice) for s in detectar_saltos(ensayo, parametros)}
 
     posiciones = ensayo.posiciones.copy()
     valido = np.all(np.isfinite(posiciones), axis=2)
@@ -55,27 +59,27 @@ def comprobar(
     disponibles = np.argwhere(apto)
     generador.shuffle(disponibles)
     for m, t in disponibles:
+        if len(elegidos) >= n:
+            break
         m, t = int(m), int(t)
         # Se separan en el tiempo, también entre marcadores distintos, para que
         # cada salto sea realmente aislado. En ensayos cortos caben menos de ``n``.
         if any(t + d in fotogramas_usados for d in range(-SEPARACION, SEPARACION + 1)):
             continue
-        if any((ensayo.etiquetas[m], t + d) in previos for d in range(-3, 4)):
+        if any((m, t + d) in previos for d in range(-3, 4)):
             continue
         elegidos.append((m, t))
         fotogramas_usados.add(t)
-        if len(elegidos) == n:
-            break
 
     reales = {}
     for m, t in elegidos:
         direccion = generador.normal(size=3)
         direccion /= np.linalg.norm(direccion)
-        reales[(ensayo.etiquetas[m], t)] = posiciones[m, t].copy()
+        reales[(m, t)] = posiciones[m, t].copy()
         posiciones[m, t] += magnitud_mm * direccion
 
     alterado = replace(ensayo, posiciones=posiciones)
-    encontrados = {(s.marcador, s.indice): s for s in detectar_saltos(alterado, parametros)}
+    encontrados = {(s.indice_marcador, s.indice): s for s in detectar_saltos(alterado, parametros)}
 
     errores = []
     detectados = 0

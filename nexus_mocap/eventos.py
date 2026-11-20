@@ -12,11 +12,15 @@ Cómo se calcula, para cada pie:
 2. El contacto se sitúa donde, tras el pico, la velocidad del talón baja a una
    fracción pequeña de ese pico. El despegue, donde la de la punta la supera
    antes del pico. Al ser relativo al propio paso, el criterio no depende de la
-   dirección de la marcha ni de lo largo o rápido que sea el paso.
+   dirección de la marcha ni de lo largo o rápido que sea el paso. Si un
+   balanceo indeciso deja dos picos sin que el pie llegue a frenar entre ellos,
+   cuentan como un solo paso; y ninguna búsqueda pasa del pico del paso vecino.
 3. El intervalo de duda son los fotogramas entre los que la velocidad cruza una
    fracción algo menor y otra algo mayor. Si el pie frena o arranca de forma
    brusca, el intervalo es estrecho; si lo hace poco a poco (apoyo plano,
-   pasos arrastrados), es ancho y la confianza se marca como baja.
+   pasos arrastrados), es ancho y la confianza se marca como baja. Si alguna de
+   esas fracciones no se llega a cruzar (se pierde el marcador o acaba el
+   ensayo), el intervalo llega hasta donde se pudo mirar y la confianza es baja.
 
 Las fracciones se eligieron con grabaciones públicas de marcha de personas
 sanas y después se comprobaron, sin cambiarlas, con un conjunto público de
@@ -106,21 +110,46 @@ def velocidad(trayectoria: np.ndarray, frecuencia: float, p: ParametrosEventos) 
     return resultado
 
 
-def _cruce(v: np.ndarray, pico: int, umbral: float, hacia_delante: bool, limite: int) -> float | None:
-    """Posición (con decimales) del primer cruce del umbral a partir del pico."""
-    if hacia_delante:
-        for i in range(pico, min(v.size - 1, pico + limite)):
-            if not np.isfinite(v[i + 1]):
-                return None
-            if v[i] >= umbral > v[i + 1]:
-                return i + (v[i] - umbral) / (v[i] - v[i + 1])
-    else:
-        for i in range(pico, max(0, pico - limite), -1):
-            if not np.isfinite(v[i - 1]):
-                return None
-            if v[i - 1] < umbral <= v[i]:
-                return i - (v[i] - umbral) / (v[i] - v[i - 1])
-    return None
+def _cruce(
+    v: np.ndarray, pico: int, umbral: float, hacia_delante: bool, limite: int
+) -> tuple[float | None, int]:
+    """Posición (con decimales) del primer cruce del umbral a partir del pico.
+
+    Devuelve también el último fotograma que se ha podido mirar: el final del
+    tramo con datos, el del ensayo o el límite de la búsqueda. Si no hay cruce,
+    la posición es ``None``.
+    """
+    paso = 1 if hacia_delante else -1
+    fin = min(v.size - 1, pico + limite) if hacia_delante else max(0, pico - limite)
+    i = pico
+    while i != fin:
+        j = i + paso
+        if not np.isfinite(v[j]):
+            return None, i
+        if v[i] >= umbral > v[j]:
+            return i + paso * (v[i] - umbral) / (v[i] - v[j]), j
+        i = j
+    return None, fin
+
+
+def _balanceos(v: np.ndarray, picos: list[int], fraccion: float) -> list[list[int]]:
+    """Agrupa los picos de velocidad que pertenecen a un mismo balanceo.
+
+    Un balanceo indeciso puede dejar dos picos. Si entre ellos la velocidad no
+    baja de ``fraccion`` del mayor (el pie no llega a frenar) y no se pierde el
+    marcador, son el mismo balanceo y deben dar un solo contacto y un solo despegue.
+    """
+    grupos: list[list[int]] = []
+    for pico in picos:
+        if grupos:
+            anterior = grupos[-1]
+            entre = v[anterior[-1] : pico + 1]
+            mayor = max(float(v[pico]), max(float(v[q]) for q in anterior))
+            if np.all(np.isfinite(entre)) and float(entre.min()) > fraccion * mayor:
+                anterior.append(pico)
+                continue
+        grupos.append([pico])
+    return grupos
 
 
 # Nombres habituales de cada marcador según el laboratorio o el fabricante, sin la letra del lado.
@@ -165,7 +194,12 @@ def marcadores_del_pie(ensayo: Ensayo, lado: str) -> dict[str, tuple[int, str] |
 
 
 def _sin_repetidos(eventos: list[Evento], separacion_s: float) -> list[Evento]:
-    """Si un mismo balanceo deja dos picos de velocidad, se queda con la propuesta del pico mayor."""
+    """Si quedan dos propuestas iguales del mismo pie casi juntas, se queda con la del pico mayor.
+
+    Los picos de un mismo balanceo ya se agrupan antes (``_balanceos``); esto es una
+    salvaguarda para señales raras en las que dos balanceos distintos dejan
+    propuestas a menos de ``separacion_s``.
+    """
     conservados: list[Evento] = []
     for evento in sorted(eventos, key=lambda e: (e.lado, e.tipo, e.tiempo_s)):
         anterior = conservados[-1] if conservados else None
@@ -208,17 +242,38 @@ def proponer_eventos(ensayo: Ensayo, parametros: ParametrosEventos | None = None
                 prominence=p.velocidad_minima_mm_s / 2,
                 distance=max(1, int(round(0.3 * fs))),
             )
-            for pico in picos:
-                centro = _cruce(v, pico, fraccion * v[pico], es_contacto, limite)
+            # Un pico pegado a un hueco suele ser solo el primer dato tras perder el
+            # marcador: el pico de verdad está dentro del hueco y no se conoce.
+            picos = [int(q) for q in picos if np.isfinite(v[q - 1]) and np.isfinite(v[q + 1])]
+            grupos = _balanceos(v, picos, p.fraccion_contacto)
+            for orden, grupo in enumerate(grupos):
+                altura = max(float(v[q]) for q in grupo)
+                # El contacto se busca tras el último pico del balanceo, sin pasar del
+                # siguiente; el despegue, antes del primero, sin pasar del anterior.
+                if es_contacto:
+                    origen = grupo[-1]
+                    tope = grupos[orden + 1][0] - origen if orden + 1 < len(grupos) else limite
+                else:
+                    origen = grupo[0]
+                    tope = origen - grupos[orden - 1][-1] if orden > 0 else limite
+                alcance = min(limite, tope)
+
+                centro, _ = _cruce(v, origen, fraccion * altura, es_contacto, alcance)
                 if centro is None:
                     continue
-                extremos = [_cruce(v, pico, f * v[pico], es_contacto, limite) for f in duda]
-                if None in extremos:
-                    desde = hasta = centro
-                    confianza = "baja"
-                else:
-                    desde, hasta = min(extremos), max(extremos)
-                    confianza = "normal" if (hasta - desde) / fs <= p.duda_amplia_s else "baja"
+                extremos = []
+                completo = True
+                for f in duda:
+                    posicion, borde = _cruce(v, origen, f * altura, es_contacto, alcance)
+                    if posicion is None:
+                        # El umbral no se alcanza (se pierde el marcador, acaba el ensayo
+                        # o empieza otro paso): la duda llega hasta donde se pudo mirar.
+                        completo = False
+                        posicion = float(borde)
+                    extremos.append(posicion)
+                desde, hasta = min(*extremos, centro), max(*extremos, centro)
+                amplio = (hasta - desde) / fs > p.duda_amplia_s
+                confianza = "normal" if completo and not amplio else "baja"
                 if poco_fiable:
                     confianza = "baja"
                 eventos.append(
@@ -231,7 +286,7 @@ def proponer_eventos(ensayo: Ensayo, parametros: ParametrosEventos | None = None
                         fotograma_hasta=ensayo.primer_fotograma + int(np.ceil(hasta)),
                         confianza=confianza,
                         marcador=ensayo.etiquetas[indice_marcador],
-                        velocidad_pico_mm_s=float(v[pico]),
+                        velocidad_pico_mm_s=altura,
                     )
                 )
 

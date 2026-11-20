@@ -39,6 +39,11 @@ usa el tobillo; si falta la punta también, pero ese despegue es poco fiable y
 el informe lo avisa. No necesita plataformas de
 fuerza.
 
+Si el marcador se pierde o el ensayo acaba antes de que la velocidad cruce el
+extremo del intervalo, este llega hasta el último fotograma con datos y la
+propuesta se marca con intervalo de duda amplio. Si el marcador se pierde justo
+en el pico de velocidad, ese paso se queda sin propuesta.
+
 Si el C3D ya trae eventos marcados, la herramienta calcula sus propuestas sin
 mirarlos y después enseña a cuántos fotogramas queda cada una. Sirve para
 probarla con un ensayo ya revisado.
@@ -63,6 +68,10 @@ Un marcador que se desplaza durante un fotograma y vuelve a su sitio en el
 siguiente sin que el paciente haga ese movimiento. Para cada uno indica el
 marcador, el fotograma, cuántos milímetros se aparta y qué posición cabría
 esperar por los fotogramas vecinos.
+
+Solo se miran los marcadores colocados en el paciente: las salidas del modelo
+(ángulos, centros articulares, ejes de los segmentos de Plug-in Gait o CGM) se
+descartan al leer el archivo.
 
 Cada aviso se clasifica así:
 
@@ -208,7 +217,7 @@ elegido antes, con personas sanas, y no se tocaron. Se reproduce con
 | Percentil 90 | 32,8 ms | 23,9 ms |
 | Sesgo (negativo: la propuesta se adelanta) | −4,7 ms | +8,8 ms |
 | A 20 ms o menos | 72,6 % | 83,9 % |
-| Evento guardado dentro del intervalo de duda | 73,6 % | 93,2 % |
+| Evento guardado dentro del intervalo de duda | 73,7 % | 93,3 % |
 
 A 150 fotogramas por segundo un fotograma dura 6,7 ms, así que la diferencia mediana ronda un
 fotograma y medio.
@@ -280,8 +289,8 @@ dirección aleatoria en tres repeticiones:
 
 | Grabación | 15 mm | 8 mm | 5 mm | Avisos falsos |
 |---|---|---|---|---|
-| `gait-pig-nz` (120 Hz) | 119 de 119 | 119 de 119 | 117 de 119 | 0 |
-| `gait-pig` (50 Hz) | 50 de 55 | 45 de 55 | 39 de 55 | 0 |
+| `gait-pig-nz` (120 Hz) | 119 de 119 | 119 de 119 | 119 de 119 | 0 |
+| `gait-pig` (50 Hz) | 55 de 56 | 49 de 56 | 40 de 56 | 0 |
 | `gait-raw` (50 Hz, sin procesar) | 49 de 53 | 38 de 53 | 20 de 53 | 1 |
 
 La propuesta quedó, de mediana, a menos de 0,6 mm de la posición realmente
@@ -290,7 +299,7 @@ medida en todos los casos; la mayor diferencia fue de 3,2 mm.
 En `gait-raw` tal como está, la herramienta da 14 avisos. Once coinciden con
 los apoyos del pie, donde tobillo, antepié y tibia se desplazan a la vez: los
 clasifica como *acompañados* y no propone corregirlos. Los otros tres son
-saltos aislados de 5 a 6 mm que quedarían para revisar.
+saltos aislados de 4,6, 5,0 y 6,2 mm que quedarían para revisar.
 
 Límites: a frecuencias de captura bajas y con registros ruidosos se escapan
 más saltos pequeños, y solo se detectan los de un fotograma. Las pruebas con

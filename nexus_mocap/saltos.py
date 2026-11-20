@@ -51,6 +51,8 @@ class Parametros:
 @dataclass(frozen=True)
 class Salto:
     marcador: str
+    indice_marcador: int
+    """Posición del marcador en ``Ensayo.etiquetas``: dos marcadores pueden compartir etiqueta."""
     indice: int
     fotograma: int
     tiempo_s: float
@@ -65,14 +67,30 @@ class Salto:
     simultaneos: int
 
 
+_VALORES_POR_BLOQUE = 1 << 20
+"""Tamaño de cada trozo de la mediana móvil: unos 8 MB, sea cual sea la duración del ensayo."""
+
+
 def _mediana_movil(valores: np.ndarray, ventana: int) -> np.ndarray:
-    """Mediana móvil por filas que ignora los NaN."""
+    """Mediana móvil por filas que ignora los NaN. ``ventana`` es impar.
+
+    Se calcula por marcador y a trozos: hacerlo de una vez con todos los
+    marcadores y fotogramas ocupa marcadores × fotogramas × ventana valores, y un
+    ensayo de pocos minutos no cabría en memoria.
+    """
     medio = ventana // 2
-    relleno = np.pad(valores, ((0, 0), (medio, medio)), constant_values=np.nan)
-    vistas = np.lib.stride_tricks.sliding_window_view(relleno, ventana, axis=1)
+    filas, n = valores.shape
+    resultado = np.full((filas, n), np.nan)
+    bloque = max(1, _VALORES_POR_BLOQUE // ventana)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        return np.nanmedian(vistas, axis=2)
+        for fila in range(filas):
+            relleno = np.pad(valores[fila], (medio, medio), constant_values=np.nan)
+            for inicio in range(0, n, bloque):
+                fin = min(n, inicio + bloque)
+                vistas = np.lib.stride_tricks.sliding_window_view(relleno[inicio : fin + 2 * medio], ventana)
+                resultado[fila, inicio:fin] = np.nanmedian(vistas, axis=1)
+    return resultado
 
 
 def _residuos(posiciones: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -188,6 +206,7 @@ def detectar_saltos(ensayo: Ensayo, parametros: Parametros | None = None) -> lis
         saltos.append(
             Salto(
                 marcador=ensayo.etiquetas[m],
+                indice_marcador=m,
                 indice=t,
                 fotograma=ensayo.fotograma(t),
                 tiempo_s=ensayo.tiempo(t),
