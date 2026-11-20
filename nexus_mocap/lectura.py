@@ -11,7 +11,21 @@ import numpy as np
 # (ángulos, fuerzas...) y no posiciones de marcadores.
 _GRUPOS_NO_MARCADOR = ("ANGLES", "FORCES", "MOMENTS", "POWERS", "SCALARS")
 
-_A_MILIMETROS = {"mm": 1.0, "cm": 10.0, "dm": 100.0, "m": 1000.0}
+
+def _escala_a_milimetros(unidad: str) -> float | None:
+    """Factor para pasar a milímetros. Algunos programas recortan o alargan el nombre de la unidad."""
+    u = unidad.strip().lower()
+    if u in ("mm", "mms") or u.startswith("mil"):
+        return 1.0
+    if u == "cm" or u.startswith("cent"):
+        return 10.0
+    if u == "dm" or u.startswith("dec"):
+        return 100.0
+    if u == "m" or u.startswith("met"):
+        return 1000.0
+    if u in ("in", "inch", "inches"):
+        return 25.4
+    return None
 
 
 @dataclass(frozen=True)
@@ -28,6 +42,8 @@ class Ensayo:
     posiciones: np.ndarray
     frecuencia: float
     primer_fotograma: int
+    avisos: tuple[str, ...] = ()
+    """Circunstancias del archivo que conviene que sepa quien lee el informe."""
 
     @property
     def n_fotogramas(self) -> int:
@@ -104,13 +120,25 @@ def leer_c3d(
         if faltan:
             raise ValueError(f"Marcadores que no están en el archivo: {', '.join(faltan)}")
     if not indices:
-        raise ValueError(f"El archivo no contiene trayectorias de marcadores: {ruta}")
+        raise ValueError(f"El archivo no contiene trayectorias de marcadores con etiqueta: {ruta.name}")
 
+    avisos: list[str] = []
     unidades = _valores(grupo, "UNITS")
-    unidad = unidades[0].lower() if unidades else "mm"
-    escala = _A_MILIMETROS.get(unidad)
-    if escala is None:
-        raise ValueError(f"Unidades de posición no reconocidas en el archivo: {unidad!r}")
+    unidad = unidades[0].strip() if unidades else ""
+    if not unidad:
+        escala = 1.0
+        avisos.append("El archivo no indica la unidad de las posiciones; se han tomado como milímetros.")
+    else:
+        escala = _escala_a_milimetros(unidad)
+        if escala is None:
+            raise ValueError(f"Unidades de posición no reconocidas en el archivo: {unidad!r}")
+
+    esperados = _fotogramas_declarados(c3d["parameters"])
+    if esperados is not None and esperados > puntos.shape[2]:
+        avisos.append(
+            f"El archivo declara {esperados} fotogramas, pero solo se han podido leer {puntos.shape[2]}: "
+            "el final del ensayo no está revisado."
+        )
 
     posiciones = np.transpose(puntos[:3, indices, :], (1, 2, 0)) * escala
     # Algunos programas guardan el marcador ausente como (0, 0, 0).
@@ -123,4 +151,72 @@ def leer_c3d(
         posiciones=posiciones,
         frecuencia=float(c3d["header"]["points"]["frame_rate"]),
         primer_fotograma=int(c3d["header"]["points"]["first_frame"]) + 1,
+        avisos=tuple(avisos),
     )
+
+
+def _fotogramas_declarados(parametros: dict) -> int | None:
+    """Número de fotogramas que el archivo dice tener, cuando lo guarda fuera de la cabecera.
+
+    La cabecera de un C3D solo llega a 65535; los ensayos más largos lo anotan aparte.
+    """
+
+    def palabras(valores) -> int:
+        # Dos enteros de 16 bits; algunos lectores los devuelven con signo.
+        return (int(valores[0]) & 0xFFFF) + 65536 * (int(valores[1]) & 0xFFFF)
+
+    try:
+        largo = parametros.get("POINT", {}).get("LONG_FRAMES", {}).get("value", [])
+        if len(largo) >= 2:
+            return palabras(largo)
+        if len(largo) == 1:
+            return int(round(float(largo[0])))
+        ensayo = parametros.get("TRIAL", {})
+        inicio = ensayo.get("ACTUAL_START_FIELD", {}).get("value", [])
+        fin = ensayo.get("ACTUAL_END_FIELD", {}).get("value", [])
+        if len(inicio) >= 2 and len(fin) >= 2:
+            return palabras(fin) - palabras(inicio) + 1
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+@dataclass(frozen=True)
+class EventoRegistrado:
+    """Evento de marcha que ya está guardado en el C3D (marcado en Nexus u otro programa)."""
+
+    lado: str  # "izquierdo" o "derecho"
+    tipo: str  # "contacto" o "despegue"
+    tiempo_s: float
+
+
+_CODIGOS = {"LHS": ("izquierdo", "contacto"), "RHS": ("derecho", "contacto")}
+_CODIGOS |= {"LTO": ("izquierdo", "despegue"), "RTO": ("derecho", "despegue")}
+
+
+def leer_eventos(ruta: str | Path) -> list[EventoRegistrado]:
+    """Lee los contactos y despegues del pie guardados en el C3D, si los hay."""
+    import ezc3d
+
+    grupo = ezc3d.c3d(str(ruta))["parameters"].get("EVENT")
+    if not grupo or "TIMES" not in grupo:
+        return []
+    tiempos = np.atleast_2d(np.asarray(grupo["TIMES"]["value"], dtype=float))
+    if tiempos.shape[0] != 2:
+        return []
+    contextos = [str(v).strip() for v in grupo.get("CONTEXTS", {}).get("value", [])]
+    etiquetas = [str(v).strip() for v in grupo.get("LABELS", {}).get("value", [])]
+
+    eventos = []
+    for i in range(tiempos.shape[1]):
+        contexto = contextos[i] if i < len(contextos) else ""
+        etiqueta = etiquetas[i] if i < len(etiquetas) else ""
+        clave = _CODIGOS.get(contexto.upper()) or _CODIGOS.get(etiqueta.upper())
+        if clave is None:
+            lado = {"left": "izquierdo", "right": "derecho"}.get(contexto.lower())
+            tipo = {"foot strike": "contacto", "foot off": "despegue"}.get(etiqueta.lower())
+            if lado is None or tipo is None:
+                continue
+            clave = (lado, tipo)
+        eventos.append(EventoRegistrado(*clave, tiempo_s=float(tiempos[0, i] * 60 + tiempos[1, i])))
+    return sorted(eventos, key=lambda e: e.tiempo_s)
