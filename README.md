@@ -33,9 +33,16 @@ mueva la marca.
 Se basa en la velocidad del marcador del talón (contacto) y de la punta
 (despegue): cada paso deja un pico de velocidad durante el balanceo, y el
 evento se sitúa donde la velocidad cae a una fracción de ese pico, o la supera.
-Al ser relativo a cada paso, no depende de la dirección de la marcha. Si faltan
-el talón o la punta, usa el marcador del tobillo. No necesita plataformas de
+Al ser relativo a cada paso, no depende de la dirección de la marcha. Como
+marcador de punta vale también la cabeza de un metatarsiano. Si falta el talón
+usa el tobillo; si falta la punta también, pero ese despegue es poco fiable y
+el informe lo avisa. No necesita plataformas de
 fuerza.
+
+Si el marcador se pierde o el ensayo acaba antes de que la velocidad cruce el
+extremo del intervalo, este llega hasta el último fotograma con datos y la
+propuesta se marca con intervalo de duda amplio. Si el marcador se pierde justo
+en el pico de velocidad, ese paso se queda sin propuesta.
 
 Si el C3D ya trae eventos marcados, la herramienta calcula sus propuestas sin
 mirarlos y después enseña a cuántos fotogramas queda cada una. Sirve para
@@ -61,6 +68,10 @@ Un marcador que se desplaza durante un fotograma y vuelve a su sitio en el
 siguiente sin que el paciente haga ese movimiento. Para cada uno indica el
 marcador, el fotograma, cuántos milímetros se aparta y qué posición cabría
 esperar por los fotogramas vecinos.
+
+Solo se miran los marcadores colocados en el paciente: las salidas del modelo
+(ángulos, centros articulares, ejes de los segmentos de Plug-in Gait o CGM) se
+descartan al leer el archivo.
 
 Cada aviso se clasifica así:
 
@@ -183,10 +194,58 @@ python -m nexus_mocap saltos datos/publicos/sample03/gait-raw.c3d
 
 ## Qué se ha medido hasta ahora
 
-Todo se ha medido con grabaciones públicas de [C3D.org](https://www.c3d.org/sampledata.html),
-de personas sanas. **Nada está validado con grabaciones de Parkinson.**
+Todo se ha medido con grabaciones públicas, sin datos de ningún hospital: primero con personas
+sanas ([C3D.org](https://www.c3d.org/sampledata.html)) y después con un conjunto abierto de marcha
+en personas con Parkinson. No se ha medido con las grabaciones del estudio al que quiere ayudar.
 
-### Eventos de marcha
+### Eventos de marcha en personas con Parkinson
+
+Conjunto público de Shida y colaboradores, *A dataset of overground walking full-body kinematics
+and kinetics in individuals with Parkinson's disease*
+([figshare, doi:10.6084/m9.figshare.14896881](https://doi.org/10.6084/m9.figshare.14896881), CC BY 4.0):
+26 personas, 13 de ellas con bloqueos de la marcha según cuestionario, cada una con y sin
+medicación. Son 887 ensayos de marcha en línea recta, descalzos, a 150 fotogramas por segundo, con
+11.529 contactos y despegues ya guardados en los archivos. Los umbrales del programa se habían
+elegido antes, con personas sanas, y no se tocaron. Se reproduce con
+`python scripts/evaluar_parkinson.py ruta/a/C3Dfiles`.
+
+| | Contacto | Despegue |
+|---|---|---|
+| Eventos guardados | 5.760 | 5.769 |
+| Con propuesta | 5.296 (91,9 %) | 5.590 (96,9 %) |
+| Diferencia mediana | 11,6 ms | 10,0 ms |
+| Percentil 90 | 32,8 ms | 23,9 ms |
+| Sesgo (negativo: la propuesta se adelanta) | −4,7 ms | +8,8 ms |
+| A 20 ms o menos | 72,6 % | 83,9 % |
+| Evento guardado dentro del intervalo de duda | 73,7 % | 93,3 % |
+
+A 150 fotogramas por segundo un fotograma dura 6,7 ms, así que la diferencia mediana ronda un
+fotograma y medio.
+
+Cómo leerlo:
+
+- **Los eventos sin propuesta están en los bordes.** Los 643 son el primero o el último de su tipo
+  en el ensayo, donde el balanceo queda cortado. De 10.927 propuestas, 41 no tienen un evento
+  guardado a menos de 0,2 s.
+- **La medicación apenas cambia el resultado**: en el contacto, 10,7 ms con medicación y 12,6 ms
+  sin ella. En las personas con bloqueos es algo peor (13,5 ms frente a 10,1 ms).
+- **Varía entre personas.** La diferencia mediana del contacto va de 6,7 a 22,8 ms según la
+  persona, y la del despegue de 3,1 a 18,6 ms.
+- **El umbral del contacto se confirma.** Eligiéndolo con la mitad de las personas y midiendo en
+  la otra mitad, vuelve a salir el 15 %. Para el despegue, en estos datos habría ido mejor el 25 %
+  (6,4 ms de mediana) que el 30 % que usa el programa; no se ha cambiado, porque los datos de
+  personas sanas apuntaban al 30 %, y la diferencia puede deberse a cómo marca cada laboratorio.
+- **El marcador importa.** Este laboratorio no usa marcador de punta sino las cabezas de los
+  metatarsianos; el programa toma la del segundo, que es donde Plug-in Gait coloca el suyo. Usando
+  el tobillo en su lugar, el despegue se adelantaba 67 ms: por eso ahora esa propuesta se marca
+  como poco fiable. El tobillo en lugar del talón, para el contacto, da 15,4 ms de mediana.
+
+Límites de esta comprobación: es marcha en línea recta, sin giros ni inicio de la marcha; es un
+solo laboratorio, con otro sistema de captura y otro juego de marcadores; y las marcas originales
+están todas en fotogramas enteros, sin que se haya podido confirmar en el artículo si se pusieron
+a mano.
+
+### Eventos de marcha en personas sanas
 
 Nueve ensayos de marcha de distintos laboratorios (50 a 120 Hz) que traen 92
 contactos y despegues ya marcados. Las propuestas se calcularon sin mirarlos.
@@ -230,8 +289,8 @@ dirección aleatoria en tres repeticiones:
 
 | Grabación | 15 mm | 8 mm | 5 mm | Avisos falsos |
 |---|---|---|---|---|
-| `gait-pig-nz` (120 Hz) | 119 de 119 | 119 de 119 | 117 de 119 | 0 |
-| `gait-pig` (50 Hz) | 50 de 55 | 45 de 55 | 39 de 55 | 0 |
+| `gait-pig-nz` (120 Hz) | 119 de 119 | 119 de 119 | 119 de 119 | 0 |
+| `gait-pig` (50 Hz) | 55 de 56 | 49 de 56 | 40 de 56 | 0 |
 | `gait-raw` (50 Hz, sin procesar) | 49 de 53 | 38 de 53 | 20 de 53 | 1 |
 
 La propuesta quedó, de mediana, a menos de 0,6 mm de la posición realmente
@@ -240,7 +299,7 @@ medida en todos los casos; la mayor diferencia fue de 3,2 mm.
 En `gait-raw` tal como está, la herramienta da 14 avisos. Once coinciden con
 los apoyos del pie, donde tobillo, antepié y tibia se desplazan a la vez: los
 clasifica como *acompañados* y no propone corregirlos. Los otros tres son
-saltos aislados de 5 a 6 mm que quedarían para revisar.
+saltos aislados de 4,6, 5,0 y 6,2 mm que quedarían para revisar.
 
 Límites: a frecuencias de captura bajas y con registros ruidosos se escapan
 más saltos pequeños, y solo se detectan los de un fotograma. Las pruebas con

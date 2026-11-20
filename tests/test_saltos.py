@@ -1,11 +1,14 @@
+import tracemalloc
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from nexus_mocap import saltos as modulo_saltos
 from nexus_mocap.comprobacion import comprobar
 from nexus_mocap.lectura import Ensayo
-from nexus_mocap.saltos import detectar_saltos
+from nexus_mocap.saltos import _mediana_movil, detectar_saltos
 
 FRECUENCIA = 100.0
 
@@ -129,3 +132,75 @@ def test_comprobacion_con_valor_conocido():
     assert resultado.error_mediano_mm < 1.0
     assert resultado.avisos_nuevos_falsos == 0
     np.testing.assert_array_equal(ensayo.posiciones, original)
+
+
+def _mediana_movil_de_una_vez(valores, ventana):
+    """Versión anterior, que construía marcadores × fotogramas × ventana valores."""
+    medio = ventana // 2
+    relleno = np.pad(valores, ((0, 0), (medio, medio)), constant_values=np.nan)
+    vistas = np.lib.stride_tricks.sliding_window_view(relleno, ventana, axis=1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.nanmedian(vistas, axis=2)
+
+
+@pytest.mark.parametrize("valores_por_bloque", [None, 51 * 7, 51 * 100])
+def test_la_mediana_movil_a_trozos_da_lo_mismo(monkeypatch, valores_por_bloque):
+    if valores_por_bloque is not None:
+        monkeypatch.setattr(modulo_saltos, "_VALORES_POR_BLOQUE", valores_por_bloque)
+    valores = np.abs(np.random.default_rng(4).normal(size=(4, 1500)))
+    valores[0, 100:180] = np.nan
+    valores[1, :30] = np.nan
+    valores[2] = np.nan
+
+    np.testing.assert_array_equal(_mediana_movil(valores, 51), _mediana_movil_de_una_vez(valores, 51))
+
+
+def test_un_ensayo_largo_cabe_en_poca_memoria():
+    # Doce minutos a 100 Hz con diez marcadores: unos 17 MB de posiciones. Calcular
+    # la mediana móvil de una vez pedía más de 300 MB solo para ella.
+    generador = np.random.default_rng(0)
+    n = 12 * 60 * 100
+    posiciones = np.cumsum(generador.normal(scale=0.5, size=(10, n, 3)), axis=1)
+    posiciones += np.arange(10)[:, None, None] * 100.0
+
+    tracemalloc.start()
+    try:
+        detectar_saltos(_ensayo(posiciones))
+        pico = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    assert pico < 200e6
+
+
+def test_dos_marcadores_con_la_misma_etiqueta(tmp_path, monkeypatch):
+    import matplotlib.pyplot as plt
+
+    from nexus_mocap.informe import dibujar_salto
+
+    posiciones = _segmento()[:2]
+    posiciones[1, :, 1] += 500.0
+    posiciones[1, 150, 1] += 20.0  # el salto está en el segundo
+    ensayo = _ensayo(posiciones, etiquetas=["Sujeto:LHEE", "Sujeto:LHEE"])
+    figuras = []
+    cerrar = plt.close
+    monkeypatch.setattr(plt, "close", lambda figura: (figuras.append(figura), cerrar(figura)))
+
+    (salto,) = detectar_saltos(ensayo)
+    dibujar_salto(ensayo, salto, tmp_path / "salto.png")
+
+    assert salto.indice_marcador == 1
+    registro = figuras[0].axes[0].lines[0].get_ydata()
+    assert np.nanmax(np.abs(registro)) > 15.0  # se dibuja el marcador del salto, no el primero
+    resultado = comprobar(ensayo, n=10, magnitud_mm=15.0, semilla=2)
+    assert resultado.detectados == resultado.insertados == 10
+    assert resultado.avisos_nuevos_falsos == 0
+
+
+@pytest.mark.parametrize("n", [0, -3])
+def test_comprobar_sin_saltos_no_inserta_ninguno(n):
+    resultado = comprobar(_ensayo(_segmento()), n=n)
+
+    assert resultado.insertados == 0
+    assert resultado.detectados == 0
