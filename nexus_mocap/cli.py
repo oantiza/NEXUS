@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 from pathlib import Path
 
 from nexus_mocap.comprobacion import comprobar
@@ -281,6 +282,12 @@ ORDENES = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    # En algunas consolas de Windows un carácter poco habitual haría fallar la escritura.
+    for flujo in (sys.stdout, sys.stderr):
+        try:
+            flujo.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     args = _argumentos().parse_args(argv)
     try:
         return ORDENES[args.orden](args)

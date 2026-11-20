@@ -15,4 +15,4 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-start "" "%~dp0informes\indice.html"
+if not defined NEXUS_NO_ABRIR start "" "%~dp0informes\indice.html"
