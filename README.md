@@ -135,6 +135,19 @@ toca.
 python -m nexus_mocap comprobar ruta/al/ensayo.c3d --magnitud-mm 8
 ```
 
+### Probar sin ninguna grabación
+
+Este script crea un ensayo de marcha simulada, con un marcador que se pierde
+unos fotogramas, para ver cómo son los informes sin descargar ni usar nada real:
+
+```bash
+python scripts/ensayo_sintetico.py
+```
+
+```bash
+python -m nexus_mocap revisar datos/sintetico
+```
+
 ### Probar con una grabación pública
 
 ```bash
