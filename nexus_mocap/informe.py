@@ -69,7 +69,7 @@ def dibujar_salto(ensayo: Ensayo, salto: Salto, ruta: Path, margen: int = 6) -> 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    m = ensayo.etiquetas.index(salto.marcador)
+    m = salto.indice_marcador
     eje = EJES.index(salto.eje)
     inicio = max(0, salto.indice - margen)
     fin = min(ensayo.n_fotogramas, salto.indice + margen + 1)

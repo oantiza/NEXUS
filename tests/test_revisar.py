@@ -1,15 +1,18 @@
 import hashlib
+import re
+from html import unescape
 from pathlib import Path
+from urllib.parse import unquote
 
 import numpy as np
 import pytest
 
-from nexus_mocap.cli import main
+from nexus_mocap.cli import _carpeta_dentro, _nombre_de_carpeta, main
 from nexus_mocap.huecos import buscar_huecos
 from nexus_mocap.lectura import Ensayo
 
-pytest.importorskip("ezc3d")
-from test_eventos import _escribir_c3d  # noqa: E402
+ezc3d = pytest.importorskip("ezc3d")
+from test_eventos import ETIQUETAS, FRECUENCIA, _escribir_c3d, _marcha  # noqa: E402
 
 
 def _huella(ruta: Path) -> str:
@@ -70,3 +73,78 @@ def test_revisar_sin_archivos_c3d_avisa(tmp_path, capsys):
 
     assert main(["revisar", str(tmp_path / "vacia")]) == 1
     assert "ningún archivo C3D" in capsys.readouterr().out
+
+
+def test_los_enlaces_del_indice_abren_el_informe_aunque_el_nombre_lleve_simbolos(tmp_path):
+    sesion = tmp_path / "sesion"
+    sesion.mkdir()
+    for nombre in ("Paciente #3 pre.c3d", "marcha 50%25.c3d", "prueba?.c3d", "con espacios.c3d"):
+        _escribir_c3d(sesion / nombre)
+    salida = tmp_path / "informes"
+
+    assert main(["revisar", str(sesion), "--salida", str(salida)]) == 0
+
+    enlaces = re.findall(r"href='([^']*)'", (salida / "indice.html").read_text(encoding="utf-8"))
+    assert len(enlaces) == 4
+    for enlace in enlaces:
+        enlace = unescape(enlace)
+        assert not set("#? ") & set(enlace)  # el navegador cortaría ahí el enlace
+        assert (salida / unquote(enlace)).is_file()
+
+
+def test_un_nombre_de_archivo_con_solo_puntos_no_escribe_fuera(tmp_path, monkeypatch, capsys):
+    sesion = tmp_path / "trabajo" / "sesion"
+    sesion.mkdir(parents=True)
+    _escribir_c3d(sesion / "..c3d")  # su nombre sin extensión es «.»
+    _escribir_c3d(sesion / "...c3d")  # y este, «..»
+    salida = tmp_path / "trabajo" / "informes"
+
+    assert main(["revisar", str(sesion), "--salida", str(salida)]) == 0
+
+    escritos = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if p.is_file())
+    assert all(e.startswith(("trabajo/sesion/", "trabajo/informes/")) for e in escritos), escritos
+    assert (salida / "ensayo" / "informe.html").is_file() and (salida / "ensayo_2" / "informe.html").is_file()
+
+    monkeypatch.chdir(tmp_path)  # «eventos» y «saltos» escriben en informes/ por defecto
+    assert main(["eventos", str(sesion / "...c3d"), "--sin-figuras"]) == 0
+    assert main(["saltos", str(sesion / "..c3d"), "--sin-figuras"]) == 0
+    assert (tmp_path / "informes" / "ensayo" / "eventos.csv").is_file()
+    assert (tmp_path / "informes" / "ensayo" / "saltos.csv").is_file()
+    assert not (tmp_path / "eventos.csv").exists() and not (tmp_path / "saltos.csv").exists()
+    capsys.readouterr()
+
+
+def test_nombre_de_la_carpeta_del_informe(tmp_path):
+    assert _nombre_de_carpeta(Path("..c3d")) == "ensayo"
+    assert _nombre_de_carpeta(Path("...c3d")) == "ensayo"
+    assert _nombre_de_carpeta(Path(" . .c3d")) == "ensayo"
+    assert _nombre_de_carpeta(Path("marcha 01.c3d")) == "marcha 01"
+    assert _carpeta_dentro(tmp_path, "marcha 01") == tmp_path / "marcha 01"
+    for nombre in ("..", ".", "../otra"):
+        with pytest.raises(ValueError):
+            _carpeta_dentro(tmp_path / "informes", nombre)
+
+
+def test_los_marcadores_sin_ningun_dato_se_cuentan_en_el_indice(tmp_path, capsys):
+    posiciones, _ = _marcha()
+    puntos = np.ones((4, 8, posiciones.shape[1]))
+    puntos[:3, :6] = np.transpose(posiciones, (2, 0, 1))
+    puntos[:3, 6:] = 0.0  # dos marcadores etiquetados que nunca se registraron
+    c3d = ezc3d.c3d()
+    c3d["parameters"]["POINT"]["RATE"]["value"] = [FRECUENCIA]
+    c3d["parameters"]["POINT"]["UNITS"]["value"] = ["mm"]
+    c3d["parameters"]["POINT"]["LABELS"]["value"] = (*ETIQUETAS, "LKNE", "RKNE")
+    c3d["data"]["points"] = puntos
+    ruta = tmp_path / "sesion" / "sin_rodillas.c3d"
+    ruta.parent.mkdir()
+    c3d.write(str(ruta))
+    salida = tmp_path / "informes"
+
+    assert main(["revisar", str(ruta), "--salida", str(salida)]) == 0
+
+    assert "0 tramos con marcador perdido, 2 marcadores sin ningún dato" in capsys.readouterr().out
+    indice = (salida / "indice.html").read_text(encoding="utf-8")
+    assert "Marcadores sin ningún dato" in indice
+    fila = re.search(r"<tr class='[^']*'><td><a href='sin_rodillas/informe.html'>.*?</tr>", indice).group(0)
+    celdas = re.findall(r"<td class='n'>([^<]*)</td>", fila)
+    assert celdas[6] == "2"  # fotogramas, contactos, despegues, duda, tramos, hueco, sin datos
