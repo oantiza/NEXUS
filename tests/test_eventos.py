@@ -185,3 +185,87 @@ def test_orden_eventos_genera_tabla_y_figura(tmp_path, capsys):
     texto = capsys.readouterr().out
     assert "El archivo ya traía 2 eventos" in texto
     assert "no se ha modificado" in texto
+
+
+def _contactos_cerca(eventos, lado, fotograma, margen=10):
+    return [
+        e
+        for e in eventos
+        if e.lado == lado and e.tipo == "contacto" and abs(e.fotograma - fotograma) < margen
+    ]
+
+
+@pytest.mark.parametrize("reaparece_s", [0.24, 0.27, 0.30])
+def test_un_pico_pegado_a_un_hueco_no_da_propuesta(reaparece_s):
+    posiciones, inicios = _marcha()
+    intacto = _contactos_cerca(proponer_eventos(_ensayo(posiciones)), "izquierdo", 187)
+    inicio = inicios["izquierdo"][1]
+    # El talón se pierde durante el pico de velocidad y reaparece ya frenando: el
+    # primer dato tras el hueco parece un pico, pero más bajo que el real.
+    posiciones[0, int((inicio + 0.05) * FRECUENCIA) : int((inicio + reaparece_s) * FRECUENCIA)] = np.nan
+
+    eventos = proponer_eventos(_ensayo(posiciones))
+
+    assert len(intacto) == 1
+    assert _contactos_cerca(eventos, "izquierdo", intacto[0].fotograma) == []
+    assert len(_tiempos(eventos, "izquierdo", "contacto")) == 3
+    assert len(_tiempos(eventos, "derecho", "contacto")) == 4
+
+
+def test_si_se_pierde_el_marcador_la_duda_llega_hasta_el_ultimo_dato():
+    posiciones, _ = _marcha()
+    (intacto,) = _contactos_cerca(proponer_eventos(_ensayo(posiciones)), "izquierdo", 187)
+    # El talón se pierde justo después de cruzar la fracción del contacto y antes de
+    # la del extremo de la duda. Con el primer fotograma 1, el índice ``corte - 1``
+    # (el último con dato) es el fotograma ``corte``.
+    corte = intacto.fotograma + 3
+    posiciones[0, corte : corte + 30] = np.nan
+
+    (evento,) = _contactos_cerca(proponer_eventos(_ensayo(posiciones)), "izquierdo", intacto.fotograma)
+
+    assert evento.confianza == "baja"
+    assert evento.fotograma_hasta == corte
+    assert evento.fotograma_desde <= intacto.fotograma_desde
+    assert evento.fotograma_hasta - evento.fotograma_desde >= 3
+
+
+def test_si_acaba_el_ensayo_la_duda_llega_hasta_el_ultimo_fotograma():
+    posiciones, _ = _marcha()
+    contactos = [
+        e for e in proponer_eventos(_ensayo(posiciones)) if e.lado == "izquierdo" and e.tipo == "contacto"
+    ]
+    n = contactos[-1].fotograma + 3  # el ensayo se corta poco después del último contacto
+
+    (evento,) = _contactos_cerca(
+        proponer_eventos(_ensayo(posiciones[:, :n])), "izquierdo", contactos[-1].fotograma
+    )
+
+    assert evento.confianza == "baja"
+    assert evento.fotograma_hasta == n
+    assert evento.fotograma_hasta - evento.fotograma_desde >= 3
+
+
+@pytest.mark.parametrize("retraso_s", [0.29, 0.30, 0.31])
+def test_un_balanceo_con_dos_picos_da_un_contacto_y_un_despegue(retraso_s):
+    t = np.arange(400) / FRECUENCIA
+    inicio, duracion = 1.0, 0.35
+
+    def tramo(desde):
+        u = np.clip((t - desde) / duracion, 0.0, 1.0)
+        return 400.0 * (10 * u**3 - 15 * u**4 + 6 * u**5)
+
+    # Un balanceo indeciso: el pie frena a medio camino sin llegar a pararse (entre
+    # los dos picos de velocidad baja al 18-28 % del pico) y sigue.
+    x = tramo(inicio) + tramo(inicio + retraso_s)
+    talon = np.stack([x, np.full_like(t, 100.0), np.full_like(t, 40.0)], axis=1)
+    talon += np.random.default_rng(1).normal(scale=0.3, size=talon.shape)
+    ensayo = Ensayo(
+        Path("s.c3d"), ("LHEE", "LTOE"), np.array([talon, talon + [180.0, 0.0, -10.0]]), FRECUENCIA, 1
+    )
+
+    eventos = proponer_eventos(ensayo)
+
+    (despegue,) = _tiempos(eventos, "izquierdo", "despegue")
+    (contacto,) = _tiempos(eventos, "izquierdo", "contacto")
+    assert 0.0 <= despegue - inicio <= 0.12
+    assert 0.0 <= (inicio + retraso_s + duracion) - contacto <= 0.12

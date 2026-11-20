@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from nexus_mocap.cli import main
-from nexus_mocap.lectura import leer_c3d
+from nexus_mocap.lectura import _primer_fotograma, leer_c3d
 
 ezc3d = pytest.importorskip("ezc3d")
 
@@ -93,3 +93,55 @@ def test_orden_comprobar(tmp_path, capsys):
 def test_archivo_inexistente_da_un_error_claro(tmp_path, capsys):
     assert main(["saltos", str(tmp_path / "no_esta.c3d")]) == 1
     assert "No existe el archivo" in capsys.readouterr().out
+
+
+def test_primer_fotograma_mas_alla_de_la_cabecera(tmp_path):
+    # La cabecera solo guarda 16 bits; Vicon anota el número completo en TRIAL:ACTUAL_START_FIELD.
+    c3d = ezc3d.c3d()
+    c3d["parameters"]["POINT"]["RATE"]["value"] = [100]
+    c3d["parameters"]["POINT"]["UNITS"]["value"] = ["mm"]
+    c3d["parameters"]["POINT"]["LABELS"]["value"] = ("LHEE",)
+    c3d["data"]["points"] = np.ones((4, 1, 200))
+    c3d["header"]["points"]["first_frame"] = 70000 % 65536 - 1
+    c3d.add_parameter("TRIAL", "ACTUAL_START_FIELD", [70000 % 65536, 70000 // 65536])
+    c3d.write(str(tmp_path / "largo.c3d"))
+
+    ensayo = leer_c3d(tmp_path / "largo.c3d")
+
+    assert ensayo.primer_fotograma == 70000
+    assert ensayo.fotograma(ensayo.n_fotogramas - 1) == 70199
+
+
+def test_primer_fotograma_con_palabras_con_signo():
+    cabecera = {"points": {"first_frame": 0}}
+    con_signo = {"header": cabecera, "parameters": {"TRIAL": {"ACTUAL_START_FIELD": {"value": [-30000, 1]}}}}
+    sin_campo = {"header": {"points": {"first_frame": 299}}, "parameters": {}}
+
+    assert _primer_fotograma(con_signo) == (65536 - 30000) + 65536
+    assert _primer_fotograma(sin_campo) == 300
+
+
+def test_descarta_centros_articulares_y_ejes_de_los_segmentos(tmp_path):
+    reales = ["LASI", "LKNE", "LANK", "LHEE", "LTOE", "LTIB", "RO", "RA", "RL", "RP", "LTOEO"]
+    modelo = ["LHJC_CGM_2.4", "LKJC_CGM_2.4", "LJCO"]
+    huesos = ["PELO", "PELA", "PELL", "PELP", "LTIBIA_CGM_2.4O", "LTIBIA_CGM_2.4A"]
+    huesos += ["LTIBIA_CGM_2.4L", "LTIBIA_CGM_2.4P", "o_Trunk", "x_Trunk", "y_Trunk", "z_Trunk"]
+    etiquetas = [f"Sujeto:{e}" for e in reales + modelo + huesos]
+    generador = np.random.default_rng(3)
+    puntos = np.ones((4, len(etiquetas), 100))
+    puntos[:3] = generador.normal(scale=100.0, size=(3, len(etiquetas), 100)) + 500.0
+    c3d = ezc3d.c3d()
+    c3d["parameters"]["POINT"]["RATE"]["value"] = [100]
+    c3d["parameters"]["POINT"]["UNITS"]["value"] = ["mm"]
+    c3d["parameters"]["POINT"]["LABELS"]["value"] = tuple(etiquetas)
+    c3d.add_parameter("POINT", "MODELED_MARKERS", ["Sujeto:LHJC_CGM_2.4", "Sujeto:LKJC_CGM_2.4"])
+    # Un grupo de salidas del modelo que solo se conoce por TYPE_GROUPS.
+    c3d.add_parameter("POINT", "JOINTS", ["Sujeto:LJCO"])
+    c3d.add_parameter("POINT", "TYPE_GROUPS", ["MODELED_MARKERS", "MODELED_MARKER", "JOINTS", "JOINT"])
+    c3d["data"]["points"] = puntos
+    c3d.write(str(tmp_path / "modelo.c3d"))
+
+    ensayo = leer_c3d(tmp_path / "modelo.c3d")
+
+    # «RO», «RA», «RL», «RP» y «LTOEO» se parecen a los ejes de un segmento, pero son marcadores.
+    assert [e.split(":")[-1] for e in ensayo.etiquetas] == reales

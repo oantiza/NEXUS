@@ -6,6 +6,7 @@ import argparse
 import math
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 from nexus_mocap.comprobacion import comprobar
 from nexus_mocap.eventos import comparar, es_tobillo, marcadores_del_pie, proponer_eventos
@@ -23,6 +24,8 @@ from nexus_mocap.lectura import Ensayo, leer_c3d, leer_eventos
 from nexus_mocap.saltos import Parametros, detectar_saltos
 
 MAX_FIGURAS = 200
+NOMBRE_SIN_TITULO = "ensayo"
+"""Carpeta que se usa cuando el nombre del archivo no da para una (``..c3d``, ``...c3d``)."""
 
 
 def _argumentos() -> argparse.ArgumentParser:
@@ -79,6 +82,30 @@ def _argumentos() -> argparse.ArgumentParser:
     return principal
 
 
+def _nombre_de_carpeta(archivo: Path) -> str:
+    """Nombre de la carpeta del informe de un ensayo, que nunca puede apuntar fuera de la de salida.
+
+    Un archivo llamado ``..c3d`` o ``...c3d`` tiene por nombre ``.`` o ``..``. Los
+    puntos y espacios finales se quitan porque Windows tampoco los conserva.
+    """
+    nombre = archivo.stem.strip().rstrip(". ")
+    return nombre or NOMBRE_SIN_TITULO
+
+
+def _carpeta_dentro(salida: Path, nombre: str) -> Path:
+    """``salida / nombre``, comprobando que de verdad queda dentro de ``salida``."""
+    carpeta = salida / nombre
+    raiz = salida.resolve()
+    destino = carpeta.resolve()
+    if destino == raiz or not destino.is_relative_to(raiz):
+        raise ValueError(f"El nombre del ensayo no sirve como carpeta del informe: {nombre!r}")
+    return carpeta
+
+
+def _salida_por_defecto(args: argparse.Namespace) -> Path:
+    return args.salida or _carpeta_dentro(Path("informes"), _nombre_de_carpeta(args.archivo))
+
+
 def _cabecera(args: argparse.Namespace, ensayo: Ensayo) -> None:
     ultimo = ensayo.fotograma(ensayo.n_fotogramas - 1)
     print(f"Ensayo: {args.archivo.name}")
@@ -91,7 +118,7 @@ def _cabecera(args: argparse.Namespace, ensayo: Ensayo) -> None:
 def _orden_saltos(args: argparse.Namespace) -> int:
     ensayo = leer_c3d(args.archivo, marcadores=args.marcadores)
     saltos = detectar_saltos(ensayo, Parametros(umbral_mm=args.umbral_mm))
-    salida = args.salida or Path("informes") / args.archivo.stem
+    salida = _salida_por_defecto(args)
     _cabecera(args, ensayo)
 
     aislados = [s for s in saltos if s.clasificacion == "aislado"]
@@ -123,7 +150,7 @@ def _orden_eventos(args: argparse.Namespace) -> int:
     eventos = proponer_eventos(ensayo)
     registrados = leer_eventos(args.archivo)
     emparejados = comparar(eventos, registrados, ensayo.frecuencia)
-    salida = args.salida or Path("informes") / args.archivo.stem
+    salida = _salida_por_defecto(args)
     _cabecera(args, ensayo)
 
     for lado in ("izquierdo", "derecho"):
@@ -240,6 +267,11 @@ def _revisar_ensayo(archivo: Path, carpeta: Path) -> ResumenEnsayo:
             if encontrado is None:
                 faltan = True
                 avisos.append(f"Pie {lado}: no hay marcador con datos para proponer el {tipo}.")
+            elif es_tobillo(encontrado[1]) and tipo == "despegue":
+                avisos.append(
+                    f"Pie {lado}: no hay marcador de punta; el despegue se propone con el del tobillo "
+                    "y es poco fiable (en grabaciones públicas de Parkinson se adelanta unos 65 ms)."
+                )
             elif es_tobillo(encontrado[1]):
                 avisos.append(f"Pie {lado}: para el {tipo} se usa el marcador del tobillo, a falta de otro.")
 
@@ -266,13 +298,14 @@ def _revisar_ensayo(archivo: Path, carpeta: Path) -> ResumenEnsayo:
     escribir(carpeta / "informe.html", pagina)
     return ResumenEnsayo(
         nombre=archivo.name,
-        enlace=f"{carpeta.name}/informe.html",
+        enlace=f"{quote(carpeta.name)}/informe.html",  # «#», «%» o «?» romperían el enlace
         fotogramas=ensayo.n_fotogramas,
         contactos=sum(1 for e in eventos if e.tipo == "contacto"),
         despegues=sum(1 for e in eventos if e.tipo == "despegue"),
         dudosos=sum(1 for e in eventos if e.confianza == "baja"),
         huecos=len(huecos),
         hueco_mas_largo_s=huecos[0].segundos if huecos else 0.0,
+        sin_datos=len(sin_datos),
         saltos_aislados=sum(1 for s in saltos if s.clasificacion == "aislado"),
     )
 
@@ -283,19 +316,24 @@ def _orden_revisar(args: argparse.Namespace) -> int:
         print("No se ha encontrado ningún archivo C3D en lo indicado.")
         return 1
     resumenes = []
-    usados: set[str] = set()
+    usados: set[str] = {"indice.html"}  # una carpeta con ese nombre impediría escribir el índice
     for archivo in archivos:
-        nombre = archivo.stem
+        base = _nombre_de_carpeta(archivo)
+        nombre = base
         numero = 2
         while nombre.lower() in usados:
-            nombre = f"{archivo.stem}_{numero}"
+            nombre = f"{base}_{numero}"
             numero += 1
         usados.add(nombre.lower())
         try:
-            resumen = _revisar_ensayo(archivo, args.salida / nombre)
+            resumen = _revisar_ensayo(archivo, _carpeta_dentro(args.salida, nombre))
+            sin_datos = ""
+            if resumen.sin_datos:
+                plural = "es" if resumen.sin_datos > 1 else ""
+                sin_datos = f", {resumen.sin_datos} marcador{plural} sin ningún dato"
             print(
                 f"{archivo.name}: {resumen.contactos} contactos y {resumen.despegues} despegues propuestos, "
-                f"{resumen.huecos} tramos con marcador perdido"
+                f"{resumen.huecos} tramos con marcador perdido{sin_datos}"
             )
         except Exception as error:  # un ensayo ilegible no debe detener al resto
             resumen = ResumenEnsayo(nombre=archivo.name, enlace=None, error=f"No se ha podido leer: {error}")

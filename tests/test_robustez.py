@@ -26,6 +26,8 @@ from test_eventos import ETIQUETAS, FRECUENCIA, _marcha  # noqa: E402
             "Sujeto:r ankle",
         ),
         ("LCAL", "LTOE", "LANK", "RCAL", "RTOE", "RANK"),
+        ("L.Heel", "L.MT2", "L.Ankle", "R.Heel", "R.MT2", "R.Ankle"),
+        ("L.Heel", "L.MT5", "L.Ankle", "R.Heel", "R.MT5", "R.Ankle"),
     ],
 )
 def test_reconoce_otras_formas_de_nombrar_los_marcadores_del_pie(etiquetas):
@@ -140,3 +142,14 @@ def test_dos_propuestas_del_mismo_balanceo_se_quedan_en_una():
 
 def test_las_etiquetas_de_prueba_siguen_siendo_las_habituales():
     assert ETIQUETAS[0] == "LHEE"
+
+
+def test_sin_marcador_de_punta_el_despegue_se_marca_como_poco_fiable():
+    posiciones, _ = _marcha()
+    etiquetas = ("LHEE", "LFOO", "LANK", "RHEE", "RFOO", "RANK")  # sin punta: se recurre al tobillo
+    eventos = proponer_eventos(Ensayo(Path("sin_punta.c3d"), etiquetas, posiciones, FRECUENCIA, 1))
+
+    despegues = [e for e in eventos if e.tipo == "despegue"]
+    contactos = [e for e in eventos if e.tipo == "contacto"]
+    assert despegues and all(e.confianza == "baja" and e.marcador.endswith("ANK") for e in despegues)
+    assert contactos and all(e.confianza == "normal" for e in contactos)

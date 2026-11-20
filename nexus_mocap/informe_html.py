@@ -52,8 +52,8 @@ def _pagina(titulo: str, cuerpo: str) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{escape(titulo)}</title>\n<style>{_ESTILO}</style>\n</head>\n<body>\n{cuerpo}\n"
         '<p class="nota" style="margin-top:26px">Son propuestas para revisar, no marcas definitivas. '
-        "El archivo original no se ha modificado. El método se probó con marcha de personas sanas; "
-        "no está validado con marcha parkinsoniana.</p>\n</body>\n</html>\n"
+        "El archivo original no se ha modificado. El método se ha comprobado con grabaciones públicas de "
+        "personas sanas y de personas con Parkinson, no con las de este estudio.</p>\n</body>\n</html>\n"
     )
 
 
@@ -116,6 +116,7 @@ def informe_ensayo(
         _dato(sum(1 for e in eventos if e.tipo == "despegue"), "despegues propuestos"),
         _dato(dudosos, "con intervalo de duda amplio", aviso=dudosos > 0),
         _dato(len(huecos), "tramos con un marcador perdido", aviso=bool(huecos)),
+        _dato(len(sin_datos), "marcadores sin ningún dato", aviso=True) if sin_datos else "",
         _dato(len(aislados), "saltos aislados de un fotograma", aviso=bool(aislados)),
         "</div>",
     ]
@@ -207,6 +208,8 @@ class ResumenEnsayo:
     dudosos: int = 0
     huecos: int = 0
     hueco_mas_largo_s: float = 0.0
+    sin_datos: int = 0
+    """Marcadores etiquetados que no tienen ningún dato en todo el ensayo."""
     saltos_aislados: int = 0
     error: str | None = None
 
@@ -222,7 +225,7 @@ def indice(resumenes: list[ResumenEnsayo]) -> str:
     for r in resumenes:
         if r.error is not None:
             filas.append(
-                f"<tr><td>{escape(r.nombre)}</td><td colspan='7' class='error'>{escape(r.error)}</td></tr>"
+                f"<tr><td>{escape(r.nombre)}</td><td colspan='8' class='error'>{escape(r.error)}</td></tr>"
             )
             continue
         clase = "duda" if r.dudosos else ""
@@ -230,12 +233,14 @@ def indice(resumenes: list[ResumenEnsayo]) -> str:
             f"<tr class='{clase}'><td><a href='{escape(r.enlace or '')}'>{escape(r.nombre)}</a></td>"
             f"<td class='n'>{r.fotogramas}</td><td class='n'>{r.contactos}</td><td class='n'>{r.despegues}</td>"
             f"<td class='n'>{r.dudosos}</td><td class='n'>{r.huecos}</td>"
-            f"<td class='n'>{_numero(r.hueco_mas_largo_s, 2) if r.huecos else '—'}</td><td class='n'>{r.saltos_aislados}</td></tr>"
+            f"<td class='n'>{_numero(r.hueco_mas_largo_s, 2) if r.huecos else '—'}</td><td class='n'>{r.sin_datos}</td>"
+            f"<td class='n'>{r.saltos_aislados}</td></tr>"
         )
     partes.append(
         "<div class='tabla'><table><thead><tr><th>Ensayo</th><th class='n'>Fotogramas</th><th class='n'>Contactos</th>"
         "<th class='n'>Despegues</th><th class='n'>Con duda amplia</th><th class='n'>Marcadores perdidos (tramos)</th>"
-        "<th class='n'>Hueco más largo (s)</th><th class='n'>Saltos aislados</th></tr></thead>"
+        "<th class='n'>Hueco más largo (s)</th><th class='n'>Marcadores sin ningún dato</th>"
+        "<th class='n'>Saltos aislados</th></tr></thead>"
         f"<tbody>{''.join(filas)}</tbody></table></div>"
     )
     return _pagina("Ensayos revisados", "\n".join(partes))
