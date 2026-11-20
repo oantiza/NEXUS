@@ -100,8 +100,9 @@ def informe_ensayo(
     sin_datos: list[str],
     figura_png: bytes | None,
     avisos: list[str],
+    secciones: tuple[str, ...] = (),
 ) -> str:
-    """Compone la página de un ensayo."""
+    """Compone la página de un ensayo. ``secciones`` se añade al final, ya en HTML."""
     ultimo = ensayo.fotograma(ensayo.n_fotogramas - 1)
     dudosos = sum(1 for e in eventos if e.confianza == "baja")
     aislados = [s for s in saltos if s.clasificacion == "aislado"]
@@ -193,6 +194,7 @@ def informe_ensayo(
             )
     else:
         partes.append("<p>No se ha encontrado ninguno.</p>")
+    partes.extend(secciones)
     return _pagina(ensayo.ruta.name, "\n".join(partes))
 
 
@@ -247,3 +249,86 @@ def indice(resumenes: list[ResumenEnsayo]) -> str:
 def escribir(ruta: Path, contenido: str) -> None:
     ruta.parent.mkdir(parents=True, exist_ok=True)
     ruta.write_text(contenido, encoding="utf-8")
+
+
+def _o_raya(valor) -> str:
+    return "—" if valor is None else str(valor)
+
+
+def seccion_giros_inicio(giros, inicio, p_giros=None, p_inicio=None) -> str:
+    """Sección experimental de giros y primer movimiento (``giros.ResultadoGiros``, ``inicio.ResultadoInicio``)."""
+    from nexus_mocap.giros import ParametrosGiros, numero
+    from nexus_mocap.inicio import ParametrosInicio
+
+    g, i = p_giros or ParametrosGiros(), p_inicio or ParametrosInicio()
+    partes = [
+        "<h2>Giros y primer movimiento (experimental)</h2>",
+        "<p class='nota'><b>Experimental.</b> Las definiciones son de la bibliografía y no están validadas con marcadores "
+        "en la enfermedad de Parkinson; no tienen por qué coincidir con las del laboratorio. "
+        f"<b>Giro</b>: tramo en que la velocidad de giro de la pelvis (rumbo de las ASIS y PSIS, filtrado a {numero(g.corte_hz)} Hz) "
+        f"supera {numero(g.umbral_giro_grados_s)} °/s durante más de {numero(g.duracion_minima_s)} s (Mellone y cols., 2016); "
+        f"el inicio y el final son el primer y el último fotograma por encima de {numero(g.umbral_giro_grados_s)} °/s, y el "
+        f"intervalo de duda llega hasta donde baja de {numero(g.umbral_reposo_grados_s)} °/s (El-Gohary y cols., 2013). "
+        f"Dos tramos del mismo sentido separados por una pausa de hasta {numero(g.pausa_maxima_s)} s son un solo giro "
+        f"(Pham y cols., 2017) y no se proponen giros de menos de {numero(g.giro_minimo_grados)}°. Sentido visto desde arriba. "
+        f"<b>Primer movimiento</b>: el registro debe empezar con al menos {numero(i.reposo_minimo_s)} s de pie y quieto "
+        f"(se usan hasta los últimos {numero(i.reposo_maximo_s)} s; Schlenstedt y cols., 2018). Pelvis y tronco: se detecta "
+        f"movimiento al superar la media del reposo + {numero(i.de_deteccion)} DE durante {numero(i.persistencia_s, 3)} s "
+        f"(Jones y cols., 2019) y el inicio se sitúa donde superó la media + {numero(i.de_inicio)} DE (Schlenstedt y cols., 2018). "
+        f"Talón: su altura supera la media + {numero(i.de_talon)} DE (Oliveira y cols., 2023). Son tres propuestas distintas: "
+        "la definición de «primer movimiento» la elige quien revisa.</p>",
+        "<h3>Giros</h3>",
+    ]
+    if giros.giros:
+        partes.append(
+            f"<p class='nota'>Rumbo de la pelvis: {escape(giros.construccion)} ({escape(', '.join(giros.marcadores))}); "
+            f"{escape(giros.eje_vertical)}. Inicio: intervalo de duda hasta el fotograma propuesto; final: desde el fotograma "
+            "propuesto. «—»: el registro no llega a ese límite.</p>"
+        )
+        filas = []
+        for x in giros.giros:
+            dudoso = x.confianza == "baja"
+            filas.append(
+                f"<tr class='{'duda' if dudoso else ''}'><td>{x.sentido}</td>"
+                f"<td class='n'><b>{_o_raya(x.fotograma_inicio)}</b></td>"
+                f"<td class='n'>{_o_raya(x.inicio_desde)} a {_o_raya(x.fotograma_inicio)}</td>"
+                f"<td class='n'><b>{_o_raya(x.fotograma_fin)}</b></td>"
+                f"<td class='n'>{_o_raya(x.fotograma_fin)} a {_o_raya(x.fin_hasta)}</td>"
+                f"<td class='n'>{_numero(x.cambio_rumbo_grados, 0)}</td><td class='n'>{_numero(x.velocidad_pico_grados_s, 0)}</td>"
+                f"<td class='n'>{_numero(x.duracion_s, 2)}</td><td>{x.confianza}</td><td>{escape(x.nota)}</td></tr>"
+            )
+        partes.append(
+            "<div class='tabla'><table><thead><tr><th>Sentido</th><th class='n'>Inicio</th><th class='n'>Duda del inicio</th>"
+            "<th class='n'>Final</th><th class='n'>Duda del final</th><th class='n'>Cambio de rumbo (°)</th>"
+            "<th class='n'>Velocidad pico (°/s)</th><th class='n'>Duración (s)</th><th>Confianza</th><th>Aviso</th></tr></thead>"
+            f"<tbody>{''.join(filas[:MAX_FILAS])}</tbody></table></div>"
+        )
+        if len(filas) > MAX_FILAS:
+            partes.append(
+                f"<p class='nota'>Se muestran los primeros {MAX_FILAS}; el resto está en giros.csv.</p>"
+            )
+    else:
+        partes.append(f"<p>{escape(giros.motivo or '')}</p>")
+
+    partes.append("<h3>Primer movimiento</h3>")
+    if inicio.inicios:
+        primero = escape(inicio.primero)
+        talon = f" El primer talón en levantarse es el {inicio.primer_talon}." if inicio.primer_talon else ""
+        partes.append(
+            f"<p>Reposo de referencia: fotogramas {inicio.reposo_desde} a {inicio.reposo_hasta}. "
+            f"Se mueve antes: <b>{primero}</b>.{talon}</p>"
+        )
+        filas = "".join(
+            f"<tr><td>{escape(x.senal)}</td><td>{escape(x.marcador)}</td><td class='n'><b>{x.fotograma}</b></td>"
+            f"<td class='n'>{x.fotograma_desde} a {x.fotograma_hasta}</td><td>{escape(x.criterio)}</td></tr>"
+            for x in inicio.inicios
+        )
+        partes.append(
+            "<div class='tabla'><table><thead><tr><th>Señal</th><th>Marcador</th><th class='n'>Fotograma propuesto</th>"
+            f"<th class='n'>Intervalo de duda</th><th>Criterio</th></tr></thead><tbody>{filas}</tbody></table></div>"
+        )
+        for nota in inicio.notas:
+            partes.append(f"<p class='nota'>{escape(nota)}</p>")
+    else:
+        partes.append(f"<p>{escape(inicio.motivo or '')}</p>")
+    return "\n".join(partes)
