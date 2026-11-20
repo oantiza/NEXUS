@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 from html import unescape
 from pathlib import Path
@@ -78,14 +79,17 @@ def test_revisar_sin_archivos_c3d_avisa(tmp_path, capsys):
 def test_los_enlaces_del_indice_abren_el_informe_aunque_el_nombre_lleve_simbolos(tmp_path):
     sesion = tmp_path / "sesion"
     sesion.mkdir()
-    for nombre in ("Paciente #3 pre.c3d", "marcha 50%25.c3d", "prueba?.c3d", "con espacios.c3d"):
+    nombres = ["Paciente #3 pre.c3d", "marcha 50%25.c3d", "con espacios.c3d"]
+    if os.name != "nt":  # Windows no admite «?» en un nombre de archivo
+        nombres.append("prueba?.c3d")
+    for nombre in nombres:
         _escribir_c3d(sesion / nombre)
     salida = tmp_path / "informes"
 
     assert main(["revisar", str(sesion), "--salida", str(salida)]) == 0
 
     enlaces = re.findall(r"href='([^']*)'", (salida / "indice.html").read_text(encoding="utf-8"))
-    assert len(enlaces) == 4
+    assert len(enlaces) == len(nombres)
     for enlace in enlaces:
         enlace = unescape(enlace)
         assert not set("#? ") & set(enlace)  # el navegador cortaría ahí el enlace
@@ -101,7 +105,7 @@ def test_un_nombre_de_archivo_con_solo_puntos_no_escribe_fuera(tmp_path, monkeyp
 
     assert main(["revisar", str(sesion), "--salida", str(salida)]) == 0
 
-    escritos = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if p.is_file())
+    escritos = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
     assert all(e.startswith(("trabajo/sesion/", "trabajo/informes/")) for e in escritos), escritos
     assert (salida / "ensayo" / "informe.html").is_file() and (salida / "ensayo_2" / "informe.html").is_file()
 
