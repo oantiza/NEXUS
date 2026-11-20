@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from nexus_mocap.comprobacion import comprobar
-from nexus_mocap.eventos import comparar, marcadores_del_pie, proponer_eventos
+from nexus_mocap.eventos import comparar, es_tobillo, marcadores_del_pie, proponer_eventos
 from nexus_mocap.huecos import buscar_huecos
 from nexus_mocap.informe import (
     dibujar_eventos,
@@ -212,13 +212,24 @@ def _revisar_ensayo(archivo: Path, carpeta: Path) -> ResumenEnsayo:
     saltos = detectar_saltos(ensayo)
     huecos, sin_datos = buscar_huecos(ensayo)
 
-    avisos = []
+    avisos = list(ensayo.avisos)
+    faltan = False
     for lado in ("izquierdo", "derecho"):
         for tipo, encontrado in marcadores_del_pie(ensayo, lado).items():
             if encontrado is None:
+                faltan = True
                 avisos.append(f"Pie {lado}: no hay marcador con datos para proponer el {tipo}.")
-            elif encontrado[1].endswith("ANK"):
+            elif es_tobillo(encontrado[1]):
                 avisos.append(f"Pie {lado}: para el {tipo} se usa el marcador del tobillo, a falta de otro.")
+
+    if faltan:
+        nombres = ", ".join(e.split(":")[-1] for e in ensayo.etiquetas[:40])
+        avisos.append(
+            "Se buscan marcadores de talón (HEE, HEEL, CAL), punta (TOE) y tobillo (ANK, ANKLE) "
+            f"con L o R delante. Los de este archivo son: {nombres}"
+            + ("…" if len(ensayo.etiquetas) > 40 else "")
+            + "."
+        )
 
     escribir_csv_eventos(eventos, emparejados, carpeta / "eventos.csv")
     escribir_csv(saltos, carpeta / "saltos.csv")

@@ -225,7 +225,8 @@ def dibujar_eventos(ensayo: Ensayo, eventos, registrados, ruta: Path) -> None:
         ax.set_ylabel(f"Pie {lado}\nvelocidad (m/s)")
         ax.set_ylim(bottom=0)
         ax.grid(alpha=0.3)
-        ax.legend(fontsize=7, loc="upper right")
+        if ax.get_legend_handles_labels()[0]:
+            ax.legend(fontsize=7, loc="upper right")
     ejes[-1].set_xlabel("Fotograma")
     nota = "Líneas: fotograma propuesto. Franja: intervalo de duda."
     if registrados:

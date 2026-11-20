@@ -24,6 +24,7 @@ sanas. No están validadas con marcha parkinsoniana.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -45,6 +46,8 @@ class ParametrosEventos:
     duda_despegue: tuple[float, float] = (0.20, 0.40)
     hueco_maximo_s: float = 0.1
     """Huecos más cortos que esto se salvan al calcular la velocidad; los más largos, no."""
+    separacion_minima_s: float = 0.15
+    """Dos propuestas iguales del mismo pie más juntas que esto se toman como una sola."""
     duda_amplia_s: float = 0.08
     """Anchura del intervalo de duda a partir de la cual la confianza se marca como baja."""
 
@@ -119,9 +122,20 @@ def _cruce(v: np.ndarray, pico: int, umbral: float, hacia_delante: bool, limite:
     return None
 
 
+# Nombres habituales de cada marcador según el laboratorio o el fabricante, sin la letra del lado.
+NOMBRES_TALON = ("HEE", "HEEL", "CAL")
+NOMBRES_PUNTA = ("TOE",)
+NOMBRES_TOBILLO = ("ANK", "ANKLE")
+
+
+def _normalizar(etiqueta: str) -> str:
+    """Quita el prefijo del sujeto y los separadores: ``Sujeto:L.Heel`` pasa a ``LHEEL``."""
+    return re.sub(r"[^A-Z0-9]", "", etiqueta.split(":")[-1].upper())
+
+
 def _buscar_marcador(ensayo: Ensayo, nombres: tuple[str, ...]) -> tuple[int, str] | None:
     """Primer marcador de la lista que existe y tiene trayectoria registrada."""
-    cortas = [e.split(":")[-1].upper() for e in ensayo.etiquetas]
+    cortas = [_normalizar(e) for e in ensayo.etiquetas]
     minimo = max(13, int(round(0.5 * ensayo.frecuencia)))
     for nombre in nombres:
         if nombre not in cortas:
@@ -132,13 +146,36 @@ def _buscar_marcador(ensayo: Ensayo, nombres: tuple[str, ...]) -> tuple[int, str
     return None
 
 
+def es_tobillo(nombre: str) -> bool:
+    """Indica si el marcador elegido es el del tobillo, que sustituye peor al talón o a la punta."""
+    return any(nombre.endswith(n) for n in NOMBRES_TOBILLO)
+
+
 def marcadores_del_pie(ensayo: Ensayo, lado: str) -> dict[str, tuple[int, str] | None]:
     """Marcador que se usa para cada tipo de evento: talón y punta, o tobillo si faltan."""
     letra = LADOS[lado]
+    tobillo = tuple(f"{letra}{n}" for n in NOMBRES_TOBILLO)
     return {
-        "contacto": _buscar_marcador(ensayo, (f"{letra}HEE", f"{letra}ANK")),
-        "despegue": _buscar_marcador(ensayo, (f"{letra}TOE", f"{letra}ANK")),
+        "contacto": _buscar_marcador(ensayo, tuple(f"{letra}{n}" for n in NOMBRES_TALON) + tobillo),
+        "despegue": _buscar_marcador(ensayo, tuple(f"{letra}{n}" for n in NOMBRES_PUNTA) + tobillo),
     }
+
+
+def _sin_repetidos(eventos: list[Evento], separacion_s: float) -> list[Evento]:
+    """Si un mismo balanceo deja dos picos de velocidad, se queda con la propuesta del pico mayor."""
+    conservados: list[Evento] = []
+    for evento in sorted(eventos, key=lambda e: (e.lado, e.tipo, e.tiempo_s)):
+        anterior = conservados[-1] if conservados else None
+        if (
+            anterior is not None
+            and (anterior.lado, anterior.tipo) == (evento.lado, evento.tipo)
+            and evento.tiempo_s - anterior.tiempo_s < separacion_s
+        ):
+            if evento.velocidad_pico_mm_s > anterior.velocidad_pico_mm_s:
+                conservados[-1] = evento
+            continue
+        conservados.append(evento)
+    return conservados
 
 
 def proponer_eventos(ensayo: Ensayo, parametros: ParametrosEventos | None = None) -> list[Evento]:
@@ -191,6 +228,7 @@ def proponer_eventos(ensayo: Ensayo, parametros: ParametrosEventos | None = None
                     )
                 )
 
+    eventos = _sin_repetidos(eventos, p.separacion_minima_s)
     eventos.sort(key=lambda e: (e.tiempo_s, e.lado, e.tipo))
     return eventos
 
