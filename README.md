@@ -96,9 +96,24 @@ También admite uno o varios archivos sueltos. Al terminar, abre
 `informe.html` y las tablas `eventos.csv`, `huecos.csv` y `saltos.csv`. Si un
 archivo no se puede leer, se indica en el índice y se sigue con los demás.
 
-En Windows se puede arrastrar un C3D, varios o una carpeta encima de
-`Revisar ensayos.bat`: ejecuta esa misma orden y abre el índice. Necesita
-Python instalado. **Este lanzador no se ha probado en un Windows real.**
+### En Windows, sin instalar Python
+
+Cada vez que se sube un cambio, GitHub construye en un Windows real el programa
+`RevisarEnsayos`, que no necesita Python. Se descarga desde la pestaña *Actions*
+del repositorio: se abre la última ejecución de «Windows» y, abajo, el archivo
+`RevisarEnsayos-windows` (se conserva 30 días).
+
+Se descomprime en cualquier carpeta y se arrastra un C3D, varios o una carpeta
+encima de `RevisarEnsayos.exe`. Los informes quedan en la carpeta `informes`,
+junto al programa, y se abre el índice en el navegador.
+
+Quien tenga Python instalado puede hacer lo mismo arrastrando los archivos
+encima de `Revisar ensayos.bat`.
+
+Qué está comprobado: en cada subida, una máquina Windows ejecuta las pruebas,
+el `.bat` y el programa construido con un ensayo simulado. Lo que no está
+comprobado es el uso a mano por una persona. Al no estar firmado, es probable
+que Windows muestre un aviso de seguridad la primera vez.
 
 ### Eventos de marcha
 
@@ -243,8 +258,6 @@ ruff check .
 
 ## Siguientes pasos previstos
 
-0. Probar `Revisar ensayos.bat` en Windows y, si hace falta, preparar una
-   versión que no necesite instalar Python.
 1. Inicio y final de giro y primer movimiento, con la definición que use el
    estudio.
 2. Relleno de huecos con marcadores de referencia, con salida «sin estimación
